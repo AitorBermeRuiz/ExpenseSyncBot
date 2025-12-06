@@ -240,25 +240,30 @@ class MCPClientManager:
             return False
 
     async def _try_connect(self) -> bool:
-        """Attempt to connect to MCP server.
+        """Attempt to connect to MCP server by actually establishing an SSE connection.
 
-        This is a simplified connection for demonstration.
-        Production code would maintain the SSE connection.
+        This validates the server is reachable and speaks MCP protocol,
+        rather than assuming a /health endpoint exists.
         """
-        # For now, we'll just verify the server is reachable
-        # The actual tool calls will establish connections as needed
-        import httpx
-
         try:
-            async with httpx.AsyncClient(timeout=settings.mcp.connection_timeout) as client:
-                # Just check if the endpoint is reachable
-                # The actual SSE connection will be made during tool calls
-                response = await client.get(
-                    settings.mcp.server_url.replace("/sse", "/health"),
-                )
-                return response.status_code == 200
-        except Exception:
-            # Server not available, but we can still start
+            # Actually try to connect via SSE and initialize MCP session
+            # This is the most reliable way to check if the server is available
+            async with sse_client(settings.mcp.server_url) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    # If we can initialize, the server is working
+                    await asyncio.wait_for(
+                        session.initialize(),
+                        timeout=settings.mcp.connection_timeout,
+                    )
+                    logger.info("MCP server connection verified via SSE handshake")
+                    return True
+
+        except asyncio.TimeoutError:
+            logger.warning("MCP server connection timed out")
+            return False
+        except Exception as e:
+            # Server not available, but we can still start the app
+            logger.debug(f"MCP server not reachable: {e}")
             return False
 
     async def call_tool(
