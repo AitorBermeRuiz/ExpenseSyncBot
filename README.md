@@ -1,160 +1,217 @@
 # ExpenseSyncBot
 
-🤖 Sistema automatizado de tracking de gastos usando **OpenAI Agents SDK** y **MCP (Model Context Protocol)**.
+Agent-based expense automation API with MCP integration. This service processes receipt emails, extracts expense data using AI, and persists it via an external MCP server.
 
-## Arquitectura
+## Architecture
 
 ```
-╔═══════════════════════════════════════════════════════════════════╗
-║                     ExpenseSyncOrchestrator                        ║
-╠═══════════════════╦═══════════════════╦═══════════════════════════╣
-║   Categorization  ║    Validation     ║         Writer            ║
-║      Agent        ║      Agent        ║         Agent             ║
-║                   ║                   ║                           ║
-║  • Clasifica      ║  • Verifica       ║  • Conecta MCP            ║
-║  • Asigna acción  ║  • Corrige        ║  • Escribe Sheets         ║
-║  • Detecta skips  ║  • Flags review   ║  • Confirma               ║
-╚═══════════════════╩═══════════════════╩═══════════════════════════╝
-         │                   │                      │
-         ▼                   ▼                      ▼
-    OpenAI GPT-4o      OpenAI GPT-4o        MCP Server (.NET)
-                                                   │
-                                                   ▼
-                                            Google Sheets
+┌─────────────┐     POST /process-receipt     ┌────────────────────────┐
+│    n8n      │ ─────────────────────────────▶│   FastAPI Service      │
+│  (Trigger)  │                               │                        │
+└─────────────┘                               │  ┌──────────────────┐  │
+                                              │  │   Orchestrator   │  │
+                                              │  │      Agent       │  │
+                                              │  └────────┬─────────┘  │
+                                              │           │            │
+                                              │     ┌─────┴─────┐      │
+                                              │     │           │      │
+                                              │  ┌──▼───┐  ┌────▼───┐  │
+                                              │  │Categ.│  │Validate│  │
+                                              │  │ Tool │  │  Tool  │  │
+                                              │  └──────┘  └────────┘  │
+                                              └───────────┬────────────┘
+                                                          │ MCP/SSE
+                                              ┌───────────▼────────────┐
+                                              │   C# MCP Server        │
+                                              │   (AddExpense tool)    │
+                                              └────────────────────────┘
 ```
 
-## Quick Start
+## Features
 
-### Requisitos
+- **AI-powered categorization**: Extracts expense data from noisy email content (HTML, signatures, etc.)
+- **Validation with correction loop**: Validates extracted data and retries with feedback on failure
+- **Multi-provider LLM support**: OpenAI, Gemini, DeepSeek, Groq
+- **MCP integration**: Connects to external MCP servers via SSE for persistence
+- **Production-ready**: Modular architecture, logging, health checks
 
-- Python 3.11+
-- .NET 8.0 SDK
-- Cuenta GoCardless con banco conectado
-- API key de OpenAI
-
-### Instalación
-
-```bash
-cd ExpenseSyncBot
-
-# Con uv (recomendado)
-uv venv
-source .venv/bin/activate
-
-# Instalar en modo editable (importante para imports)
-uv pip install -e .
-
-# O con pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-### Configuración
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-Variables requeridas:
-```env
-GOCARDLESS_SECRET_ID=...
-GOCARDLESS_SECRET_KEY=...
-BANK_ACCOUNT_ID=...
-OPENAI_API_KEY=sk-...
-MCP_SERVER_PROJECT_PATH=/path/to/Budget_Automation/src
-```
-
-### Compilar servidor MCP (una vez)
-
-```bash
-cd /path/to/Budget_Automation/Budget_Automation.MCPServer/src
-dotnet build -c Release
-```
-
-### Ejecutar
-
-```bash
-python main.py
-```
-
-## Estructura del Proyecto
+## Project Structure
 
 ```
 ExpenseSyncBot/
-├── main.py                      # Entry point
-├── config/
-│   ├── __init__.py
-│   └── settings.py              # Configuración
 ├── src/
 │   ├── __init__.py
-│   ├── agents/                  # 🤖 OpenAI Agents
+│   ├── main.py              # FastAPI app with lifespan
+│   ├── core/
 │   │   ├── __init__.py
-│   │   ├── categorization_agent.py
-│   │   ├── validation_agent.py
-│   │   └── orchestrator.py      # Coordinador
+│   │   ├── configs.py       # LLM registry + settings
+│   │   ├── logging.py       # Loguru configuration
+│   │   └── llm_manager.py   # LLM client management
 │   ├── models/
 │   │   ├── __init__.py
-│   │   └── transaction.py       # Data models
-│   ├── services/
+│   │   └── schemas.py       # Pydantic models
+│   ├── agents/
 │   │   ├── __init__.py
-│   │   ├── gocardless.py        # Bank API
-│   │   ├── mcp_server.py        # .NET lifecycle
-│   │   └── openai_client.py     # Legacy (opcional)
-│   └── validators/
+│   │   ├── prompts.py       # System prompts
+│   │   ├── tools.py         # Internal Python tools
+│   │   └── orchestrator.py  # Main orchestration logic
+│   └── services/
 │       ├── __init__.py
-│       └── transaction_validator.py  # Reglas custom
+│       └── mcp_client.py    # MCP SSE client
+├── tests/
 ├── .env.example
 ├── pyproject.toml
-└── requirements.txt
+└── README.md
 ```
 
-## Agentes
+## Installation
 
-### CategorizationAgent
+```bash
+# Clone the repository
+git clone <repo-url>
+cd ExpenseSyncBot
 
-Clasifica transacciones en categorías:
-- Alimentación, Transporte, Hogar, Salud, Ocio
-- Ropa, Tecnología, Educación, Finanzas, Otros
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-Decide la acción:
-- `register`: Registrar en el presupuesto
-- `skip`: Omitir (transferencias internas, devoluciones)
-- `review`: Marcar para revisión manual
+# Install dependencies
+pip install -e .
 
-### ValidationAgent
+# Or with uv
+uv sync
+```
 
-Verifica las categorizaciones:
-- Detecta errores comunes
-- Aplica reglas de negocio
-- Puede corregir categorías o cambiar acciones
+## Configuration
 
-### WriterAgent
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
 
-Escribe en Google Sheets via MCP:
-- Usa herramientas `write_range` y `get_ranges`
-- Formatea datos para la hoja de gastos
-
-## Personalización
-
-### Habilitar validación LLM
-
+2. Edit `.env` with your API keys and settings:
 ```env
-ENABLE_LLM_VERIFICATION=true
+# Required: At least one LLM provider API key
+OPENAI_API_KEY=sk-your-key
+# Or
+GROQ_API_KEY=your-groq-key
+
+# MCP Server URL (your C# server)
+MCP__SERVER_URL=http://localhost:5000/sse
+
+# Choose providers
+ORCHESTRATOR__LLM_PROVIDER=openai
+ORCHESTRATOR__CATEGORIZER_PROVIDER=groq-fast
 ```
 
-### Reglas personalizadas
+## Usage
 
-```python
-from src.validators import ValidationRule, TransactionAction
+### Start the API
 
-# Omitir Netflix
-skip_netflix = ValidationRule(
-    name="skip_netflix",
-    condition=lambda tx: "netflix" in tx.description.lower(),
-    action=TransactionAction.SKIP
-)
+```bash
+# Development mode (with hot reload)
+DEBUG=true python -m src.main
+
+# Or with uvicorn directly
+uvicorn src.main:app --reload --port 8000
+```
+
+### API Endpoints
+
+#### Process Receipt
+```bash
+POST /process-receipt
+
+{
+  "email_body": "Your receipt email content...",
+  "email_subject": "Receipt from Amazon",  # optional
+  "sender": "orders@amazon.com"             # optional
+}
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "message": "Recibo procesado exitosamente",
+  "data": {
+    "comercio": "Amazon",
+    "importe": 29.99,
+    "moneda": "EUR",
+    "fecha": "2024-12-06",
+    "categoria": "tecnologia",
+    "descripcion": "Echo Dot"
+  },
+  "attempts": 1,
+  "errors": []
+}
+```
+
+#### Health Check
+```bash
+GET /health
+GET /health/detailed
+```
+
+#### List Tools
+```bash
+GET /tools
+```
+
+### n8n Integration
+
+In your n8n workflow:
+
+1. **Trigger**: Email trigger (IMAP, Gmail, etc.)
+2. **HTTP Request node**:
+   - Method: POST
+   - URL: `http://your-server:8000/process-receipt`
+   - Body:
+     ```json
+     {
+       "email_body": "{{ $json.text }}",
+       "email_subject": "{{ $json.subject }}",
+       "sender": "{{ $json.from }}"
+     }
+     ```
+
+## LLM Providers
+
+The system supports multiple LLM providers through a registry pattern:
+
+| Provider | Model | Use Case |
+|----------|-------|----------|
+| `openai` | gpt-4o-mini | Default orchestrator |
+| `openai-gpt4` | gpt-4o | Higher accuracy |
+| `gemini` | gemini-2.0-flash | Alternative |
+| `deepseek` | deepseek-chat | Cost-effective |
+| `groq` | llama-3.3-70b | Fast inference |
+| `groq-fast` | llama-3.1-8b | Very fast, categorization |
+
+## Processing Flow
+
+1. **Receipt arrives** → n8n sends POST to `/process-receipt`
+2. **Orchestrator** → Coordinates the workflow
+3. **Categorize** → AI extracts: merchant, amount, date, category
+4. **Validate** → Checks business rules (amount > 0, valid date, etc.)
+5. **Correction Loop** → If validation fails, retry with feedback (max 3 attempts)
+6. **Persist** → Call MCP `AddExpense` tool to save
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Type checking
+mypy src/
+
+# Linting
+ruff check src/
+ruff format src/
 ```
 
 ## License

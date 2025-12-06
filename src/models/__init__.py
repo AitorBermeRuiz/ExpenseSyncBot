@@ -1,5 +1,19 @@
-"""Data models for ExpenseSyncBot."""
+"""Pydantic models for ExpenseSyncBot."""
 
-from src.models.transaction import Transaction, TransactionAction
+from src.models.schemas import (
+    CategorizedExpense,
+    ExpenseCategory,
+    ProcessReceiptRequest,
+    ProcessReceiptResponse,
+    ProcessingStatus,
+    ValidationResult,
+)
 
-__all__ = ["Transaction", "TransactionAction"]
+__all__ = [
+    "CategorizedExpense",
+    "ExpenseCategory",
+    "ProcessReceiptRequest",
+    "ProcessReceiptResponse",
+    "ProcessingStatus",
+    "ValidationResult",
+]
