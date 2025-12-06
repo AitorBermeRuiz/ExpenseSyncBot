@@ -1,5 +1,0 @@
-# Core dependencies
-openai-agents>=0.0.3
-mcp>=1.0.0
-requests>=2.31.0
-python-dotenv>=1.0.0

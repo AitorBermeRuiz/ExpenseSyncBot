@@ -1,333 +1,301 @@
-"""Orchestrator - Coordinates agents and MCP tools for expense sync."""
+"""Orchestrator agent for expense processing.
+
+This module implements the main orchestration logic using OpenAI's
+Chat Completions API with function calling. The orchestrator coordinates:
+1. Receipt categorization
+2. Expense validation
+3. Correction loop on validation failures
+4. Persistence via MCP tools
+"""
 
 import json
-import logging
-from typing import Optional
+from typing import Any
 
-from agents import Agent, Runner, function_tool
-from mcp import ClientSession
+from loguru import logger
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageToolCall
 
-from src.models.transaction import Transaction, TransactionAction
-from src.agents.categorization_agent import CategorizationAgent
-from src.agents.validation_agent import ValidationAgent
+from src.agents.prompts import ORCHESTRATOR_SYSTEM_PROMPT
+from src.agents.tools import categorize_receipt, validate_expense_from_dict
+from src.core.configs import settings
+from src.core.llm_manager import llm_manager
+from src.models.schemas import (
+    CATEGORIZE_RECEIPT_SCHEMA,
+    VALIDATE_EXPENSE_SCHEMA,
+    CategorizedExpense,
+    ProcessingStatus,
+    ProcessReceiptResponse,
+)
+from src.services.mcp_client import mcp_client
 
-logger = logging.getLogger(__name__)
 
+class OrchestratorAgent:
+    """Agent that orchestrates the receipt processing workflow.
 
-class ExpenseSyncOrchestrator:
+    Uses OpenAI function calling to coordinate between:
+    - Internal Python tools (categorize, validate)
+    - External MCP tools (AddExpense)
     """
-    Orchestrates the expense sync workflow using OpenAI Agents SDK.
-    
-    Flow:
-    1. Categorization Agent classifies transactions
-    2. Validation Agent double-checks (optional)
-    3. Writer Agent sends to Google Sheets via MCP
-    """
-    
-    def __init__(
-        self,
-        model: str = "gpt-4o-mini",
-        enable_validation: bool = True,
-        custom_rules: Optional[str] = None
-    ):
-        self.model = model
-        self.enable_validation = enable_validation
-        
-        # Initialize agents
-        self.categorization_agent = CategorizationAgent(model=model)
-        self.validation_agent = ValidationAgent(
-            model=model,
-            custom_rules=custom_rules
-        ) if enable_validation else None
-        
-        # MCP session will be set when running
-        self._mcp_session: Optional[ClientSession] = None
-        self._mcp_tools: list = []
-    
-    async def setup_mcp_tools(self, session: ClientSession) -> None:
-        """
-        Setup MCP tools from the .NET server.
-        
-        Args:
-            session: Active MCP client session
-        """
-        self._mcp_session = session
-        
-        # Get available tools from MCP server
-        tools_response = await session.list_tools()
-        
-        logger.info(f"🔧 MCP Tools disponibles: {[t.name for t in tools_response.tools]}")
-        
-        # Store tool definitions for the writer agent
-        self._mcp_tools = tools_response.tools
-    
-    def _create_writer_agent(self) -> Agent:
-        """Create the writer agent with MCP tools."""
-        
-        # We need to capture self for the closure
-        orchestrator = self
-        
-        @function_tool
-        async def write_expenses_to_sheet(
-            range: str,
-            values: list[list[str]]
-        ) -> str:
-            """
-            Write expense data to Google Sheets.
-            
-            Args:
-                range: Sheet range in A1 notation (e.g., "Gastos!A2:F10")
-                values: 2D array of values to write
-            
-            Returns:
-                Result message from the sheet operation
-            """
-            if not orchestrator._mcp_session:
-                return "Error: MCP session not initialized"
-            
-            try:
-                result = await orchestrator._mcp_session.call_tool(
-                    "write_range",
-                    {"range": range, "values": values}
-                )
-                return str(result)
-            except Exception as e:
-                return f"Error writing to sheet: {e}"
-        
-        @function_tool
-        async def read_sheet_range(ranges: list[str]) -> str:
-            """
-            Read data from Google Sheets to check existing entries.
-            
-            Args:
-                ranges: List of ranges to read in A1 notation
-            
-            Returns:
-                Data from the specified ranges
-            """
-            if not orchestrator._mcp_session:
-                return "Error: MCP session not initialized"
-            
-            try:
-                result = await orchestrator._mcp_session.call_tool(
-                    "get_ranges",
-                    {"range": ranges}
-                )
-                return str(result)
-            except Exception as e:
-                return f"Error reading sheet: {e}"
-        
-        return Agent(
-            name="EscritorGastos",
-            instructions="""Eres un agente que escribe gastos en Google Sheets.
 
-Tu trabajo es:
-1. Recibir transacciones categorizadas y validadas
-2. Formatear los datos para la hoja de cálculo
-3. Escribir en el rango correcto
+    def __init__(self) -> None:
+        self._orchestrator_provider = settings.orchestrator.llm_provider
+        self._categorizer_provider = settings.orchestrator.categorizer_provider
+        self._max_attempts = settings.orchestrator.max_correction_attempts
 
-## FORMATO DE LA HOJA:
-- Columna A: Fecha (dd/mm/yyyy)
-- Columna B: Descripción
-- Columna C: Comercio
-- Columna D: Categoría
-- Columna E: Importe (positivo, sin signo)
-- Columna F: Notas
+        # Get clients
+        self._orchestrator_client = llm_manager.get_client(self._orchestrator_provider)
+        self._categorizer_client = llm_manager.get_client(self._categorizer_provider)
 
-## IMPORTANTE:
-- Solo escribe transacciones con acción "register"
-- El importe debe ser positivo (valor absoluto del gasto)
-- Usa el rango "Gastos!A:F" para añadir al final
+        if not self._orchestrator_client:
+            raise RuntimeError(
+                f"Failed to initialize orchestrator LLM client for provider: "
+                f"{self._orchestrator_provider}"
+            )
 
-Usa write_expenses_to_sheet para escribir los datos.""",
-            model=self.model,
-            tools=[write_expenses_to_sheet, read_sheet_range]
-        )
-    
-    async def process_transactions(
-        self,
-        transactions: list[Transaction],
-        sheet_range: str = "Gastos!A:F"
-    ) -> dict:
-        """
-        Process transactions through the agent pipeline.
-        
-        Args:
-            transactions: List of transactions to process
-            sheet_range: Target range in Google Sheets
-        
-        Returns:
-            Processing results summary
-        """
-        results = {
-            "total": len(transactions),
-            "categorized": 0,
-            "validated": 0,
-            "written": 0,
-            "skipped": 0,
-            "errors": []
-        }
-        
-        if not transactions:
-            logger.info("📭 No hay transacciones para procesar")
-            return results
-        
-        # Step 1: Categorization
-        logger.info(f"\n🏷️  PASO 1: Categorizando {len(transactions)} transacciones...")
-        
-        categorized = await self._run_categorization(transactions)
-        results["categorized"] = len(categorized)
-        
-        # Step 2: Validation (optional)
-        if self.enable_validation and self.validation_agent:
-            logger.info(f"\n✅ PASO 2: Validando categorizaciones...")
-            validated = await self._run_validation(categorized)
+        # Use orchestrator client for categorization if categorizer not available
+        if not self._categorizer_client:
+            logger.warning(
+                f"Categorizer provider '{self._categorizer_provider}' not available, "
+                f"falling back to orchestrator provider"
+            )
+            self._categorizer_client = self._orchestrator_client
+            self._categorizer_model = llm_manager.get_model_name(self._orchestrator_provider)
         else:
-            logger.info("\n⏭️  PASO 2: Validación deshabilitada, continuando...")
-            validated = categorized
-        
-        results["validated"] = len(validated)
-        
-        # Filter by action
-        to_register = [tx for tx in validated if tx.action == TransactionAction.REGISTER]
-        to_skip = [tx for tx in validated if tx.action == TransactionAction.SKIP]
-        to_review = [tx for tx in validated if tx.action == TransactionAction.REVIEW]
-        
-        results["skipped"] = len(to_skip)
-        
-        logger.info(f"\n📊 Resumen:")
-        logger.info(f"   ✅ A registrar: {len(to_register)}")
-        logger.info(f"   ⏭️  Omitidos: {len(to_skip)}")
-        logger.info(f"   👀 Para revisar: {len(to_review)}")
-        
-        # Step 3: Write to sheet
-        if to_register and self._mcp_session:
-            logger.info(f"\n📝 PASO 3: Escribiendo {len(to_register)} transacciones...")
-            written = await self._run_writer(to_register, sheet_range)
-            results["written"] = written
-        
-        return results
-    
-    async def _run_categorization(
-        self,
-        transactions: list[Transaction]
-    ) -> list[Transaction]:
-        """Run categorization agent on transactions."""
-        
-        prompt = self.categorization_agent.format_transactions_prompt(transactions)
-        agent = self.categorization_agent.get_agent()
-        
-        # Run the agent
-        result = await Runner.run(agent, prompt)
-        
-        # Parse tool calls from result to update transactions
-        tx_map = {tx.id: tx for tx in transactions}
-        
-        for item in result.new_items:
-            if hasattr(item, 'raw_item') and item.raw_item.get('type') == 'function_call_output':
-                try:
-                    output = json.loads(item.raw_item.get('output', '{}'))
-                    tx_id = output.get('transaction_id')
-                    
-                    if tx_id in tx_map:
-                        tx = tx_map[tx_id]
-                        tx.category = output.get('category', '')
-                        tx.action = TransactionAction(output.get('action', 'register'))
-                        tx.skip_reason = output.get('skip_reason', '')
-                        tx.notes = output.get('notes', '')
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    logger.warning(f"Error parsing categorization: {e}")
-        
-        return transactions
-    
-    async def _run_validation(
-        self,
-        transactions: list[Transaction]
-    ) -> list[Transaction]:
-        """Run validation agent on categorized transactions."""
-        
-        if not self.validation_agent:
-            return transactions
-        
-        # Only validate transactions marked for register
-        to_validate = [tx for tx in transactions if tx.action == TransactionAction.REGISTER]
-        
-        if not to_validate:
-            return transactions
-        
-        prompt = self.validation_agent.format_validation_prompt(to_validate)
-        agent = self.validation_agent.get_agent()
-        
-        result = await Runner.run(agent, prompt)
-        
-        # Parse validation results
-        tx_map = {tx.id: tx for tx in transactions}
-        
-        for item in result.new_items:
-            if hasattr(item, 'raw_item') and item.raw_item.get('type') == 'function_call_output':
-                try:
-                    output = json.loads(item.raw_item.get('output', '{}'))
-                    tx_id = output.get('transaction_id')
-                    
-                    if tx_id in tx_map and not output.get('is_valid', True):
-                        tx = tx_map[tx_id]
-                        
-                        if output.get('corrected_category'):
-                            tx.category = output['corrected_category']
-                        
-                        if output.get('corrected_action'):
-                            tx.action = TransactionAction(output['corrected_action'])
-                        
-                        if output.get('validation_notes'):
-                            existing = tx.notes or ''
-                            tx.notes = f"{existing} | Validación: {output['validation_notes']}".strip(' |')
-                    
-                    # Handle flagged for review
-                    if output.get('flagged'):
-                        tx = tx_map.get(tx_id)
-                        if tx:
-                            tx.action = TransactionAction.REVIEW
-                            tx.notes = f"{tx.notes or ''} | {output.get('reason', '')}".strip(' |')
-                            
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    logger.warning(f"Error parsing validation: {e}")
-        
-        return transactions
-    
-    async def _run_writer(
-        self,
-        transactions: list[Transaction],
-        sheet_range: str
-    ) -> int:
-        """Run writer agent to send transactions to Google Sheets."""
-        
-        writer_agent = self._create_writer_agent()
-        
-        # Format transactions for the writer
-        rows_data = []
-        for tx in transactions:
-            rows_data.append({
-                "date": tx.date.strftime("%d/%m/%Y"),
-                "description": tx.description,
-                "merchant": tx.merchant_name or "",
-                "category": tx.category or "",
-                "amount": tx.absolute_amount,
-                "notes": tx.notes or ""
-            })
-        
-        prompt = f"""Escribe estas {len(transactions)} transacciones en Google Sheets.
+            self._categorizer_model = llm_manager.get_model_name(self._categorizer_provider)
 
-Datos a escribir:
-{json.dumps(rows_data, indent=2, ensure_ascii=False)}
+        self._orchestrator_model = llm_manager.get_model_name(self._orchestrator_provider)
 
-Usa el rango: {sheet_range}
+    async def _get_tools(self) -> list[dict[str, Any]]:
+        """Get all available tools (internal + MCP).
 
-Formatea cada fila como: [fecha, descripción, comercio, categoría, importe, notas]"""
-        
-        try:
-            result = await Runner.run(writer_agent, prompt)
-            logger.info(f"✅ Escritura completada")
-            return len(transactions)
-        except Exception as e:
-            logger.error(f"❌ Error en escritura: {e}")
-            return 0
+        Returns:
+            List of tool schemas in OpenAI format
+        """
+        tools = [
+            CATEGORIZE_RECEIPT_SCHEMA,
+            VALIDATE_EXPENSE_SCHEMA,
+        ]
+
+        # Add MCP tools if available
+        mcp_tools = await mcp_client.get_available_tools()
+        tools.extend(mcp_tools)
+
+        return tools
+
+    async def _execute_tool(
+        self,
+        tool_call: ChatCompletionMessageToolCall,
+        email_text: str,
+        current_expense: CategorizedExpense | None,
+    ) -> tuple[str, CategorizedExpense | None]:
+        """Execute a tool call and return the result.
+
+        Args:
+            tool_call: The tool call from OpenAI
+            email_text: Original email text for categorization
+            current_expense: Current expense data if available
+
+        Returns:
+            Tuple of (result_string, updated_expense)
+        """
+        tool_name = tool_call.function.name
+        arguments = json.loads(tool_call.function.arguments)
+
+        logger.info(f"Executing tool: {tool_name}")
+        logger.debug(f"Tool arguments: {arguments}")
+
+        if tool_name == "categorize_receipt":
+            # Use the categorizer client for this tool
+            text = arguments.get("text", email_text)
+            feedback = arguments.get("feedback")
+
+            result = await categorize_receipt(
+                client=self._categorizer_client,
+                model=self._categorizer_model,
+                text=text,
+                feedback=feedback,
+            )
+
+            if result.success and result.expense:
+                current_expense = result.expense
+                return json.dumps({
+                    "success": True,
+                    "expense": result.expense.model_dump(mode="json"),
+                }), current_expense
+            else:
+                return json.dumps({
+                    "success": False,
+                    "error": result.error,
+                }), current_expense
+
+        elif tool_name == "validate_expense":
+            result = validate_expense_from_dict(arguments)
+            return json.dumps({
+                "is_valid": result.result.is_valid,
+                "error_message": result.result.error_message,
+                "warnings": result.result.warnings,
+            }), current_expense
+
+        elif tool_name == "AddExpense":
+            # MCP tool call
+            result = await mcp_client.call_tool(tool_name, arguments)
+            return json.dumps(result), current_expense
+
+        else:
+            # Unknown tool - might be another MCP tool
+            logger.warning(f"Unknown tool: {tool_name}, attempting MCP call")
+            result = await mcp_client.call_tool(tool_name, arguments)
+            return json.dumps(result), current_expense
+
+    async def process_receipt(
+        self,
+        email_body: str,
+        email_subject: str | None = None,
+        sender: str | None = None,
+    ) -> ProcessReceiptResponse:
+        """Process a receipt email through the full workflow.
+
+        Args:
+            email_body: Raw email body content
+            email_subject: Optional email subject
+            sender: Optional sender address
+
+        Returns:
+            ProcessReceiptResponse with processing result
+        """
+        logger.info("Starting receipt processing")
+
+        errors: list[str] = []
+        attempts = 0
+        current_expense: CategorizedExpense | None = None
+
+        # Build initial context
+        context = f"Email Body:\n{email_body}"
+        if email_subject:
+            context = f"Subject: {email_subject}\n\n{context}"
+        if sender:
+            context = f"From: {sender}\n{context}"
+
+        # Get available tools
+        tools = await self._get_tools()
+        logger.debug(f"Available tools: {[t['function']['name'] for t in tools]}")
+
+        # Initialize conversation
+        messages = [
+            {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Procesa el siguiente recibo de email:\n\n{context}",
+            },
+        ]
+
+        # Main orchestration loop
+        max_iterations = 10  # Safety limit
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+            logger.debug(f"Orchestration iteration {iteration}")
+
+            try:
+                response = await self._orchestrator_client.chat.completions.create(
+                    model=self._orchestrator_model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.1,
+                )
+
+                message = response.choices[0].message
+
+                # Check if we're done (no tool calls)
+                if not message.tool_calls:
+                    logger.info("Orchestrator finished processing")
+
+                    # Determine final status based on what we have
+                    if current_expense:
+                        return ProcessReceiptResponse(
+                            status=ProcessingStatus.SUCCESS,
+                            message="Recibo procesado exitosamente",
+                            data=current_expense.model_dump(mode="json"),
+                            attempts=attempts,
+                            errors=errors,
+                        )
+                    else:
+                        return ProcessReceiptResponse(
+                            status=ProcessingStatus.CATEGORIZATION_FAILED,
+                            message=message.content or "No se pudo extraer información del recibo",
+                            attempts=attempts,
+                            errors=errors,
+                        )
+
+                # Add assistant message to history
+                messages.append(message.model_dump(exclude_none=True))
+
+                # Process tool calls
+                for tool_call in message.tool_calls:
+                    if tool_call.function.name == "categorize_receipt":
+                        attempts += 1
+
+                        if attempts > self._max_attempts:
+                            logger.warning(f"Max categorization attempts ({self._max_attempts}) reached")
+                            return ProcessReceiptResponse(
+                                status=ProcessingStatus.CATEGORIZATION_FAILED,
+                                message=f"Máximo de intentos alcanzado ({self._max_attempts})",
+                                attempts=attempts,
+                                errors=errors,
+                            )
+
+                    # Execute the tool
+                    result_str, current_expense = await self._execute_tool(
+                        tool_call,
+                        email_body,
+                        current_expense,
+                    )
+
+                    # Check for errors in validation
+                    try:
+                        result_data = json.loads(result_str)
+                        if "error" in result_data and result_data.get("error"):
+                            errors.append(result_data["error"])
+                        if "error_message" in result_data and result_data.get("error_message"):
+                            errors.append(result_data["error_message"])
+                    except json.JSONDecodeError:
+                        pass
+
+                    # Add tool result to messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result_str,
+                    })
+
+            except Exception as e:
+                logger.exception(f"Error in orchestration loop: {e}")
+                errors.append(str(e))
+                return ProcessReceiptResponse(
+                    status=ProcessingStatus.ERROR,
+                    message=f"Error interno: {e}",
+                    attempts=attempts,
+                    errors=errors,
+                )
+
+        # Max iterations reached
+        logger.warning("Max orchestration iterations reached")
+        return ProcessReceiptResponse(
+            status=ProcessingStatus.ERROR,
+            message="Se alcanzó el límite de iteraciones del orquestador",
+            data=current_expense.model_dump(mode="json") if current_expense else None,
+            attempts=attempts,
+            errors=errors,
+        )
+
+
+# Factory function for dependency injection
+async def get_orchestrator() -> OrchestratorAgent:
+    """Factory function to create orchestrator instance.
+
+    Returns:
+        Configured OrchestratorAgent instance
+    """
+    return OrchestratorAgent()

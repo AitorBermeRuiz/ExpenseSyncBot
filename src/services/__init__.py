@@ -1,7 +1,8 @@
-"""Services module for ExpenseSyncBot."""
+"""Services for external integrations."""
 
-from src.services.gocardless import GoCardlessService
-from src.services.mcp_server import MCPServerManager
-from src.services.openai_client import OpenAICategorizationService
+from src.services.mcp_client import MCPClient, mcp_client
 
-__all__ = ["GoCardlessService", "MCPServerManager", "OpenAICategorizationService"]
+__all__ = [
+    "MCPClient",
+    "mcp_client",
+]
