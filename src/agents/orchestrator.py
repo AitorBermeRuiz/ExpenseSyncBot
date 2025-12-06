@@ -104,7 +104,10 @@ class OrchestratorAgent:
         logger.info(f"Executing tool: {tool_name}")
         logger.debug(f"Tool arguments: {arguments}")
 
-        if tool_name == "categorize_receipt":
+        # Normalize tool name for comparison (handle case sensitivity)
+        tool_name_lower = tool_name.lower()
+
+        if tool_name_lower == "categorize_receipt":
             # Use the categorizer client for this tool
             text = arguments.get("text", email_text)
             feedback = arguments.get("feedback")
@@ -128,7 +131,7 @@ class OrchestratorAgent:
                     "error": result.error,
                 }), current_expense
 
-        elif tool_name == "validate_expense":
+        elif tool_name_lower == "validate_expense":
             result = validate_expense_from_dict(arguments)
             return json.dumps({
                 "is_valid": result.result.is_valid,
@@ -136,14 +139,10 @@ class OrchestratorAgent:
                 "warnings": result.result.warnings,
             }), current_expense
 
-        elif tool_name == "AddExpense":
-            # MCP tool call
-            result = await mcp_client.call_tool(tool_name, arguments)
-            return json.dumps(result), current_expense
-
         else:
-            # Unknown tool - might be another MCP tool
-            logger.warning(f"Unknown tool: {tool_name}, attempting MCP call")
+            # Any other tool is assumed to be an MCP tool (e.g., AddExpense, add_expense)
+            # Use the original tool_name to preserve the exact casing the MCP server expects
+            logger.info(f"Delegating to MCP tool: {tool_name}")
             result = await mcp_client.call_tool(tool_name, arguments)
             return json.dumps(result), current_expense
 

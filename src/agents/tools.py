@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from loguru import logger
 from openai import AsyncOpenAI
 
-from src.agents.prompts import CATEGORIZER_SYSTEM_PROMPT
+from src.agents.prompts import CATEGORIZER_SYSTEM_PROMPT, MERCHANT_HINTS
 from src.models.schemas import (
     CategorizedExpense,
     CategorizationToolResponse,
@@ -43,6 +43,15 @@ async def categorize_receipt(
     """
     logger.info("Categorizing receipt text")
 
+    # Build enhanced system prompt with merchant hints
+    merchant_hints_str = json.dumps(MERCHANT_HINTS, indent=2, ensure_ascii=False)
+    enhanced_system_prompt = (
+        f"{CATEGORIZER_SYSTEM_PROMPT}\n\n"
+        f"## Pistas de Comercios Conocidos\n"
+        f"Usa estas pistas para identificar mejor formatos de fecha y categorías típicas:\n"
+        f"```json\n{merchant_hints_str}\n```"
+    )
+
     # Build the user message
     user_content = f"Analiza el siguiente email de recibo y extrae los datos del gasto:\n\n{text}"
 
@@ -54,7 +63,7 @@ async def categorize_receipt(
         response = await client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": CATEGORIZER_SYSTEM_PROMPT},
+                {"role": "system", "content": enhanced_system_prompt},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.1,  # Low temperature for consistent extraction
