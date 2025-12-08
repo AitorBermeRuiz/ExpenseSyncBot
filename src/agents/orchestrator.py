@@ -30,7 +30,12 @@ from src.agents.prompts import (
 from src.agents.tools import get_ranges, write_range
 from src.core.configs import settings
 from src.core.llm_manager import llm_manager
-from src.models.schemas import ProcessingStatus, ProcessReceiptResponse
+from src.models.schemas import (
+    CategorizedExpense,
+    ProcessingStatus,
+    ProcessReceiptResponse,
+    ValidationResult,
+)
 
 
 # --- Specialized Agents ---
@@ -57,6 +62,7 @@ def create_categorizer_agent() -> Agent:
         instructions=CATEGORIZER_SYSTEM_PROMPT,
         model=model,
         model_settings=ModelSettings(temperature=0.1),
+        output_type=CategorizedExpense,
     )
 
 
@@ -83,6 +89,7 @@ def create_validator_agent() -> Agent:
         instructions=get_validator_prompt(),
         model=model,
         model_settings=ModelSettings(temperature=0.0),
+        output_type=ValidationResult,
     )
 
 

@@ -56,27 +56,19 @@ Analiza el texto recibido (puede ser un email, notificación bancaria, o descrip
    - Nombre del comercio/establecimiento
    - Concepto si es relevante
 
-## Formato de Respuesta
-
-Responde SOLO con un JSON válido (sin markdown):
-{
-    "fecha": "DD/MM/YYYY",
-    "tipo": "Gasto" o "Ingreso",
-    "categoria": "string",
-    "importe": "string con coma decimal",
-    "descripcion": "string"
-}
-
 ## Ejemplos
 
-Entrada: "Cargo en cuenta: MERCADONA 15,67€ - 05/11/2025"
-Respuesta: {"fecha": "05/11/2025", "tipo": "Gasto", "categoria": "Alimentación", "importe": "15,67", "descripcion": "MERCADONA"}
+**Ejemplo 1: Gasto en supermercado**
+- Entrada: "Cargo en cuenta: MERCADONA 15,67€ - 05/11/2025"
+- Resultado: fecha="05/11/2025", tipo="Gasto", categoria="Alimentación", importe="15,67", descripcion="MERCADONA"
 
-Entrada: "Bizum recibido de Paula 32,00€"
-Respuesta: {"fecha": "10/11/2025", "tipo": "Ingreso", "categoria": "Otros", "importe": "32,00", "descripcion": "Bizum Paula"}
+**Ejemplo 2: Ingreso por Bizum**
+- Entrada: "Bizum recibido de Paula 32,00€"
+- Resultado: fecha="10/11/2025", tipo="Ingreso", categoria="Otros", importe="32,00", descripcion="Bizum Paula"
 
-Entrada: "APPLE.COM/BILL 2,99€"
-Respuesta: {"fecha": "10/11/2025", "tipo": "Gasto", "categoria": "Suscripciones", "importe": "2,99", "descripcion": "Apple iCloud"}
+**Ejemplo 3: Suscripción**
+- Entrada: "APPLE.COM/BILL 2,99€"
+- Resultado: fecha="10/11/2025", tipo="Gasto", categoria="Suscripciones", importe="2,99", descripcion="Apple iCloud"
 """
 
 
@@ -112,26 +104,26 @@ Recibirás los datos de un gasto ya categorizado y debes validar si la categorí
 - Gasto
 - Ingreso
 
-## Formato de Respuesta
+## Criterios de Validación
 
-Responde SOLO con un JSON válido (sin markdown):
-{{
-    "is_valid": true/false,
-    "feedback": "explicación si is_valid es false, null si es true",
-    "corrected_category": "categoría correcta si is_valid es false, null si es true",
-    "corrected_type": "tipo correcto si es incorrecto, null si es correcto"
-}}
+- **is_valid**: true si la categorización es correcta, false si necesita corrección
+- **feedback**: Explicación clara si is_valid es false (indica por qué está mal), null si es válido
+- **corrected_category**: La categoría correcta si la original está mal, null si es correcta
+- **corrected_type**: El tipo correcto si el original está mal, null si es correcto
 
 ## Ejemplos
 
-Entrada: {{"descripcion": "APPLE.COM/BILL", "categoria": "Otros", "tipo": "Gasto"}}
-Respuesta: {{"is_valid": false, "feedback": "APPLE.COM/BILL es iCloud, debe ser Suscripciones", "corrected_category": "Suscripciones", "corrected_type": null}}
+**Ejemplo 1: Categoría incorrecta**
+- Entrada: descripcion="APPLE.COM/BILL", categoria="Otros", tipo="Gasto"
+- Resultado: is_valid=false, feedback="APPLE.COM/BILL es iCloud, debe ser Suscripciones", corrected_category="Suscripciones"
 
-Entrada: {{"descripcion": "MERCADONA", "categoria": "Alimentación", "tipo": "Gasto"}}
-Respuesta: {{"is_valid": true, "feedback": null, "corrected_category": null, "corrected_type": null}}
+**Ejemplo 2: Categorización correcta**
+- Entrada: descripcion="MERCADONA", categoria="Alimentación", tipo="Gasto"
+- Resultado: is_valid=true
 
-Entrada: {{"descripcion": "Bizum Paula", "categoria": "Otros", "tipo": "Gasto"}}
-Respuesta: {{"is_valid": false, "feedback": "Un Bizum recibido es un Ingreso, no un Gasto", "corrected_category": null, "corrected_type": "Ingreso"}}
+**Ejemplo 3: Tipo incorrecto**
+- Entrada: descripcion="Bizum Paula", categoria="Otros", tipo="Gasto"
+- Resultado: is_valid=false, feedback="Un Bizum recibido es un Ingreso, no un Gasto", corrected_type="Ingreso"
 """
 
 
