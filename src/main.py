@@ -11,8 +11,8 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from src.agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
-from src.agents.orchestrator import OrchestratorAgent, get_orchestrator
+from src.expense_agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
+from src.expense_agents.orchestrator import OrchestratorAgent, get_orchestrator
 from src.core.configs import settings
 from src.core.logging import setup_logging
 from src.models.schemas import (

@@ -19,7 +19,7 @@ Pattern:
     result = await Runner.run(orchestrator, message)
 """
 
-from src.agents.orchestrator import (
+from src.expense_agents.orchestrator import (
     OrchestratorAgent,
     create_categorizer_agent,
     create_expense_orchestrator,
@@ -28,14 +28,14 @@ from src.agents.orchestrator import (
     get_orchestrator,
     process_receipt_with_agents,
 )
-from src.agents.prompts import (
+from src.expense_agents.prompts import (
     CATEGORIZER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
     PERSISTENCE_SYSTEM_PROMPT,
     get_validator_prompt,
     load_business_rules,
 )
-from src.agents.tools import (
+from src.expense_agents.tools import (
     get_ranges,
     write_range,
 )

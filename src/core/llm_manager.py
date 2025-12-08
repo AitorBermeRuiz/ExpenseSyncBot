@@ -6,11 +6,14 @@ instances for different LLM providers using the agents SDK.
 
 import os
 
+from loguru import logger
+from openai import AsyncOpenAI
+
 from agents import OpenAIChatCompletionsModel
 from loguru import logger
 from openai import AsyncOpenAI
 
-from src.core.configs import AVAILABLE_LLMS, LLMConfig, LLMProvider
+from src.core.configs import AVAILABLE_LLMS, LLMConfig, LLMProvider, settings
 
 
 class LLMManager:
@@ -41,7 +44,18 @@ class LLMManager:
             logger.error(f"Unknown LLM provider: {provider}")
             return None
 
+        # First try environment variables (os.environ). If the process was
+        # started with keys loaded via Pydantic Settings (from a .env file),
+        # they will be accessible through `settings` as well — so we use the
+        # settings object as a fallback to avoid requiring manual env export.
         api_key = os.getenv(config.api_key_env_var)
+        if not api_key:
+            # config.api_key_env_var is like 'GOOGLE_API_KEY' -> attribute on
+            # settings will be 'google_api_key' (Pydantic maps env var to field
+            # name). Use lowercase to derive the attribute name.
+            attr_name = config.api_key_env_var.lower()
+            api_key = getattr(settings, attr_name, None)
+
         if not api_key:
             logger.warning(
                 f"API key not found for provider '{provider}' "

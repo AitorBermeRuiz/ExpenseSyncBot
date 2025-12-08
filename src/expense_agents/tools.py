@@ -100,12 +100,17 @@ async def get_ranges(
         result = await mcp_client.call_tool(
             "get_ranges",
             {
-                "ranges": ranges,
+                "range": ranges,
             }
         )
 
         if result.get("success"):
             logger.info(f"Successfully read {len(ranges)} range(s)")
+            # --- INICIO DEL CAMBIO ---
+            data_leida = result.get("data") or result.get("values") or result
+            # Imprimimos los datos crudos para ver qué está llegando
+            logger.info(f"🔍 DEBUG DATOS EXCEL: {json.dumps(data_leida, indent=2)}") 
+            # --- FIN DEL CAMBIO ---
             return json.dumps({
                 "success": True,
                 "data": result.get("data") or result.get("values") or result,
