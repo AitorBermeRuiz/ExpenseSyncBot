@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from src.agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
 from src.agents.orchestrator import OrchestratorAgent, get_orchestrator
 from src.core.configs import settings
 from src.core.logging import setup_logging
@@ -65,7 +66,7 @@ app = FastAPI(
 # CORS middleware for n8n and other clients
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -162,19 +163,6 @@ async def process_receipt(
 @app.get("/tools", tags=["Tools"])
 async def list_available_tools() -> dict:
     """List all available tools (agent-tools + function-tools + MCP)."""
-    # Agent-based tools (agents converted via .as_tool())
-    agent_tools = [
-        "categorize_expense",      # CategorizadorGastos.as_tool()
-        "validate_categorization", # ValidadorGastos.as_tool()
-        "save_expense",            # PersistenciaGastos.as_tool()
-    ]
-
-    # Function tools (@function_tool decorator) used by persistence agent
-    function_tools = [
-        "get_ranges",   # MCP: Read from Google Sheets
-        "write_range",  # MCP: Write to Google Sheets
-    ]
-
     # MCP tools (from external C# server)
     mcp_tools = []
     try:
@@ -184,10 +172,10 @@ async def list_available_tools() -> dict:
         logger.warning(f"Could not fetch MCP tools: {e}")
 
     return {
-        "agent_tools": agent_tools,
-        "function_tools": function_tools,
+        "agent_tools": AGENT_TOOLS,
+        "function_tools": FUNCTION_TOOLS,
         "mcp_tools": mcp_tools,
-        "total": len(agent_tools) + len(function_tools) + len(mcp_tools),
+        "total": len(AGENT_TOOLS) + len(FUNCTION_TOOLS) + len(mcp_tools),
         "architecture": "OpenAI Agents SDK with .as_tool() pattern",
     }
 

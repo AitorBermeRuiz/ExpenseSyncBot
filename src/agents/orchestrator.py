@@ -21,6 +21,11 @@ Pattern:
 from agents import Agent, Runner, ModelSettings, WebSearchTool, trace
 from loguru import logger
 
+from src.agents.constants import (
+    TOOL_CATEGORIZE_EXPENSE,
+    TOOL_SAVE_EXPENSE,
+    TOOL_VALIDATE_CATEGORIZATION,
+)
 from src.agents.prompts import (
     CATEGORIZER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -32,6 +37,7 @@ from src.core.configs import settings
 from src.core.llm_manager import llm_manager
 from src.models.schemas import (
     CategorizedExpense,
+    OrchestratorResult,
     ProcessingStatus,
     ProcessReceiptResponse,
     ValidationResult,
@@ -65,7 +71,6 @@ def create_categorizer_agent() -> Agent:
         instructions=CATEGORIZER_SYSTEM_PROMPT,
         model=model,
         model_settings=ModelSettings(temperature=0.1),
-        output_type=CategorizedExpense,
         output_type=CategorizedExpense,
     )
 
@@ -145,7 +150,7 @@ def create_expense_orchestrator() -> Agent:
 
     # Convert agents to tools using .as_tool()
     categorizer_tool = categorizer_agent.as_tool(
-        tool_name="categorize_expense",
+        tool_name=TOOL_CATEGORIZE_EXPENSE,
         tool_description=(
             "Extrae y categoriza los datos de un gasto desde el texto de un email/notificación bancaria. "
             "Devuelve un objeto estructurado con: fecha (DD/MM/YYYY), tipo (Gasto/Ingreso), categoria, importe (con coma decimal), descripcion. "
@@ -156,7 +161,7 @@ def create_expense_orchestrator() -> Agent:
     )
 
     validator_tool = validator_agent.as_tool(
-        tool_name="validate_categorization",
+        tool_name=TOOL_VALIDATE_CATEGORIZATION,
         tool_description=(
             "Valida si la categorización de un gasto es correcta según las reglas de negocio. "
             "Pásale los datos del gasto: descripcion, categoria, tipo. "
@@ -165,7 +170,7 @@ def create_expense_orchestrator() -> Agent:
     )
 
     persistence_tool = persistence_agent.as_tool(
-        tool_name="save_expense",
+        tool_name=TOOL_SAVE_EXPENSE,
         tool_description=(
             "Guarda un gasto validado en Google Sheets. "
             "Pásale los datos completos del gasto: fecha, tipo, categoria, importe, descripcion. "
@@ -197,6 +202,7 @@ def create_expense_orchestrator() -> Agent:
         model=model,
         model_settings=ModelSettings(temperature=0.1),
         tools=tools,
+        output_type=OrchestratorResult,
     )
 
 
@@ -241,47 +247,59 @@ async def process_receipt_with_agents(
         with trace("ExpenseProcessing"):
             result = await Runner.run(orchestrator, message)
 
-        # Parse the result
-        final_output = result.final_output
+        # Get structured output from the orchestrator
+        orchestrator_result: OrchestratorResult = result.final_output
 
-        logger.info(f"Orchestrator finished. Output: {final_output[:200] if final_output else 'None'}...")
+        if not orchestrator_result:
+            logger.error("Orchestrator returned no output")
+            return ProcessReceiptResponse(
+                status=ProcessingStatus.ERROR,
+                message="El orquestador no devolvió respuesta",
+                attempts=1,
+                errors=["No output from orchestrator"],
+            )
 
-        # Try to extract structured data from the response
-        if final_output:
-            output_lower = final_output.lower()
+        logger.info(f"Orchestrator finished. Success: {orchestrator_result.success}")
 
-            if "error" in output_lower and "guardado" not in output_lower:
-                return ProcessReceiptResponse(
-                    status=ProcessingStatus.ERROR,
-                    message=final_output,
-                    attempts=1,
-                    errors=[final_output],
+        # Map OrchestratorResult to ProcessReceiptResponse
+        if orchestrator_result.success:
+            # Build success message
+            if orchestrator_result.sheet_row and orchestrator_result.expense_data:
+                message = (
+                    f"Gasto guardado exitosamente en {orchestrator_result.sheet_row}: "
+                    f"{orchestrator_result.expense_data.descripcion} - "
+                    f"{orchestrator_result.expense_data.importe}€ "
+                    f"({orchestrator_result.expense_data.categoria})"
                 )
+            else:
+                message = "Gasto procesado exitosamente"
 
-            if "guardado" in output_lower or "éxito" in output_lower or "success" in output_lower:
-                return ProcessReceiptResponse(
-                    status=ProcessingStatus.SUCCESS,
-                    message=final_output,
-                    data={"raw_response": final_output},
-                    attempts=1,
-                    errors=[],
-                )
+            # Prepare expense data for response
+            expense_dict = (
+                orchestrator_result.expense_data.model_dump()
+                if orchestrator_result.expense_data
+                else None
+            )
 
-            # Default: treat as partial success
             return ProcessReceiptResponse(
                 status=ProcessingStatus.SUCCESS,
-                message=final_output,
-                data={"raw_response": final_output},
+                message=message,
+                data=expense_dict,
                 attempts=1,
                 errors=[],
             )
+        else:
+            # Handle error case
+            error_msg = orchestrator_result.error_message or "Error desconocido en el procesamiento"
+            logger.error(f"Orchestrator reported error: {error_msg}")
 
-        return ProcessReceiptResponse(
-            status=ProcessingStatus.ERROR,
-            message="El orquestador no devolvió respuesta",
-            attempts=1,
-            errors=["No output from orchestrator"],
-        )
+            return ProcessReceiptResponse(
+                status=ProcessingStatus.ERROR,
+                message=error_msg,
+                data=None,
+                attempts=1,
+                errors=[error_msg],
+            )
 
     except Exception as e:
         logger.exception(f"Error in orchestrator: {e}")

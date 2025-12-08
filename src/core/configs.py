@@ -7,7 +7,6 @@ This module provides:
 - Integration with OpenAI Agents SDK
 """
 
-import os
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -111,6 +110,12 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, description="API port")
     debug: bool = Field(default=False, description="Debug mode")
 
+    # CORS Configuration
+    cors_origins: list[str] = Field(
+        default=["*"],
+        description="Allowed CORS origins. Use ['*'] for all origins or specify domains like ['https://app.example.com']",
+    )
+
     # Logging
     log_level: str = Field(default="INFO", description="Log level")
 
@@ -119,23 +124,6 @@ class Settings(BaseSettings):
 
     # Orchestrator Settings
     orchestrator: OrchestratorSettings = Field(default_factory=OrchestratorSettings)
-
-    # LLM API Keys (loaded from environment)
-    @property
-    def openai_api_key(self) -> str | None:
-        return os.getenv("OPENAI_API_KEY")
-
-    @property
-    def google_api_key(self) -> str | None:
-        return os.getenv("GOOGLE_API_KEY")
-
-    @property
-    def deepseek_api_key(self) -> str | None:
-        return os.getenv("DEEPSEEK_API_KEY")
-
-    @property
-    def groq_api_key(self) -> str | None:
-        return os.getenv("GROQ_API_KEY")
 
 
 # Global settings instance

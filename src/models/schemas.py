@@ -143,3 +143,34 @@ class ValidationResult(BaseModel):
         default=None,
         description="Correct type if original was wrong",
     )
+
+
+class OrchestratorResult(BaseModel):
+    """Structured output from the main orchestrator agent.
+
+    This model is used as output_type for the Orchestrator Agent,
+    ensuring robust and type-safe results instead of parsing free text.
+    """
+
+    success: bool = Field(
+        ...,
+        description=(
+            "True if the expense was successfully processed and saved, "
+            "False if there was an error at any stage"
+        ),
+    )
+    expense_data: CategorizedExpense | None = Field(
+        default=None,
+        description="The final categorized and validated expense data (null if failed)",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error description if success is False (null if successful)",
+    )
+    sheet_row: str | None = Field(
+        default=None,
+        description=(
+            "The row where the expense was saved in Google Sheets (e.g., 'Gastos!A55:E55'). "
+            "Null if not saved or if save failed."
+        ),
+    )

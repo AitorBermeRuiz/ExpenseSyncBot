@@ -1,10 +1,11 @@
 """MCP Client for connecting to external MCP servers via SSE.
 
-This module provides a client that connects to an MCP server (like the C# server)
-using Server-Sent Events (SSE) transport and exposes discovered tools.
+This module provides a persistent connection manager that maintains
+a long-lived SSE connection to the MCP server with automatic reconnection.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from loguru import logger
@@ -15,107 +16,135 @@ from mcp.types import Tool
 from src.core.configs import settings
 
 
-class MCPClient:
-    """Client for connecting to MCP servers via SSE.
+class MCPClientManager:
+    """Manager for maintaining a persistent MCP client connection.
 
-    Manages the connection lifecycle and provides access to MCP tools
-    like AddExpense from external servers.
+    This class manages a long-lived SSE connection to the MCP server,
+    with automatic reconnection if the connection drops.
     """
 
     def __init__(self) -> None:
         self._session: ClientSession | None = None
         self._tools: dict[str, Tool] = {}
         self._connected: bool = False
-        self._server_url: str = settings.mcp.server_url
+        self._connection_lock = asyncio.Lock()
+        self._connection_context: Any = None
+        self._streams_context: Any = None
 
     @property
     def is_connected(self) -> bool:
-        """Check if connected to MCP server."""
+        """Check if the client is connected."""
         return self._connected and self._session is not None
 
-    @property
-    def available_tools(self) -> list[str]:
-        """List available tool names from MCP server."""
-        return list(self._tools.keys())
+    async def startup(self) -> bool:
+        """Initialize MCP client connection on application startup.
 
-    def get_tool_schema(self, tool_name: str) -> dict[str, Any] | None:
-        """Get the OpenAI-compatible tool schema for an MCP tool.
-
-        Args:
-            tool_name: Name of the MCP tool
+        Establishes a persistent SSE connection that will be reused
+        for all tool calls.
 
         Returns:
-            Tool schema in OpenAI function calling format, or None if not found
+            True if connection successful
         """
-        tool = self._tools.get(tool_name)
-        if not tool:
-            return None
+        logger.info("Starting MCP client manager")
+        return await self._connect()
 
-        # Convert MCP tool to OpenAI function schema
-        return {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description or f"MCP tool: {tool.name}",
-                "parameters": tool.inputSchema if tool.inputSchema else {"type": "object", "properties": {}},
-            },
-        }
-
-    def get_all_tool_schemas(self) -> list[dict[str, Any]]:
-        """Get OpenAI-compatible schemas for all available MCP tools.
-
-        Returns:
-            List of tool schemas in OpenAI function calling format
-        """
-        return [
-            schema
-            for tool_name in self._tools
-            if (schema := self.get_tool_schema(tool_name)) is not None
-        ]
-
-    async def connect(self) -> bool:
-        """Connect to the MCP server and discover available tools.
+    async def _connect(self) -> bool:
+        """Establish persistent connection to MCP server.
 
         Returns:
             True if connection successful, False otherwise
         """
-        logger.info(f"Connecting to MCP server at {self._server_url}")
+        async with self._connection_lock:
+            # Close existing connection if any
+            if self._session or self._connection_context:
+                await self._disconnect_internal()
 
-        for attempt in range(settings.mcp.retry_attempts):
             try:
-                # Create SSE client context
-                async with sse_client(self._server_url) as (read_stream, write_stream):
-                    # Create and initialize session
-                    async with ClientSession(read_stream, write_stream) as session:
-                        self._session = session
+                server_url = settings.mcp.server_url
+                logger.info(f"Establishing persistent connection to MCP server at {server_url}")
 
-                        # Initialize the connection
-                        await session.initialize()
-                        logger.info("MCP session initialized")
+                # Create the SSE client context and keep it alive
+                # We use __aenter__ to manually manage the context manager lifecycle
+                self._streams_context = sse_client(server_url)
+                read_stream, write_stream = await self._streams_context.__aenter__()
 
-                        # Discover available tools
-                        tools_result = await session.list_tools()
-                        self._tools = {tool.name: tool for tool in tools_result.tools}
+                # Create session context
+                self._connection_context = ClientSession(read_stream, write_stream)
+                self._session = await self._connection_context.__aenter__()
 
-                        logger.info(
-                            f"Discovered {len(self._tools)} MCP tools: {list(self._tools.keys())}"
-                        )
+                # Initialize the session
+                await asyncio.wait_for(
+                    self._session.initialize(),
+                    timeout=settings.mcp.connection_timeout,
+                )
+                logger.info("MCP session initialized")
 
-                        self._connected = True
-                        return True
+                # Discover available tools
+                tools_result = await self._session.list_tools()
+                self._tools = {tool.name: tool for tool in tools_result.tools}
+
+                logger.info(
+                    f"Discovered {len(self._tools)} MCP tools: {list(self._tools.keys())}"
+                )
+
+                self._connected = True
+                logger.success("MCP client manager started successfully with persistent connection")
+                return True
+
+            except asyncio.TimeoutError:
+                logger.warning("MCP server connection timed out")
+                await self._disconnect_internal()
+                return False
 
             except Exception as e:
-                logger.warning(
-                    f"MCP connection attempt {attempt + 1}/{settings.mcp.retry_attempts} "
-                    f"failed: {e}"
-                )
-                if attempt < settings.mcp.retry_attempts - 1:
-                    await asyncio.sleep(settings.mcp.retry_delay)
+                logger.warning(f"Failed to connect to MCP server: {e}")
+                await self._disconnect_internal()
+                return False
 
-        logger.error(
-            f"Failed to connect to MCP server after {settings.mcp.retry_attempts} attempts"
-        )
-        self._connected = False
+    async def _disconnect_internal(self) -> None:
+        """Internal method to close the connection without acquiring lock."""
+        try:
+            # Close session context
+            if self._connection_context and self._session:
+                await self._connection_context.__aexit__(None, None, None)
+
+            # Close streams context
+            if self._streams_context:
+                await self._streams_context.__aexit__(None, None, None)
+
+        except Exception as e:
+            logger.debug(f"Error during disconnect: {e}")
+
+        finally:
+            self._session = None
+            self._connection_context = None
+            self._streams_context = None
+            self._tools = {}
+            self._connected = False
+
+    async def _ensure_connected(self) -> bool:
+        """Ensure the connection is alive, reconnecting if necessary.
+
+        Returns:
+            True if connected (or successfully reconnected), False otherwise
+        """
+        if self.is_connected:
+            return True
+
+        logger.warning("MCP connection lost, attempting to reconnect...")
+
+        # Try to reconnect with retries
+        for attempt in range(settings.mcp.retry_attempts):
+            logger.info(f"Reconnection attempt {attempt + 1}/{settings.mcp.retry_attempts}")
+
+            if await self._connect():
+                logger.success("Successfully reconnected to MCP server")
+                return True
+
+            if attempt < settings.mcp.retry_attempts - 1:
+                await asyncio.sleep(settings.mcp.retry_delay * (attempt + 1))  # Exponential backoff
+
+        logger.error("Failed to reconnect to MCP server after all attempts")
         return False
 
     async def call_tool(
@@ -123,226 +152,102 @@ class MCPClient:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Call an MCP tool with the given arguments.
+        """Call an MCP tool using the persistent connection.
 
-        Args:
-            tool_name: Name of the tool to call
-            arguments: Tool arguments as a dictionary
-
-        Returns:
-            Tool result as a dictionary
-
-        Raises:
-            RuntimeError: If not connected or tool not found
-        """
-        if not self.is_connected or self._session is None:
-            raise RuntimeError("Not connected to MCP server")
-
-        if tool_name not in self._tools:
-            raise RuntimeError(f"Tool '{tool_name}' not found. Available: {self.available_tools}")
-
-        logger.info(f"Calling MCP tool: {tool_name}")
-        logger.debug(f"Tool arguments: {arguments}")
-
-        try:
-            result = await self._session.call_tool(tool_name, arguments)
-
-            # Process result content
-            if result.content:
-                # MCP returns content as a list of content blocks
-                # Extract text content
-                response_data = {}
-                for content in result.content:
-                    if hasattr(content, "text"):
-                        # Try to parse as JSON
-                        try:
-                            import json
-
-                            response_data = json.loads(content.text)
-                        except json.JSONDecodeError:
-                            response_data = {"result": content.text}
-                        break
-
-                logger.info(f"MCP tool '{tool_name}' completed successfully")
-                return {"success": True, **response_data}
-
-            return {"success": True, "result": None}
-
-        except Exception as e:
-            logger.error(f"MCP tool call failed: {e}")
-            return {"success": False, "error": str(e)}
-
-    async def disconnect(self) -> None:
-        """Disconnect from the MCP server."""
-        if self._session:
-            logger.info("Disconnecting from MCP server")
-            # Session cleanup is handled by context manager
-            self._session = None
-            self._tools = {}
-            self._connected = False
-
-
-class MCPClientManager:
-    """Manager for maintaining a persistent MCP client connection.
-
-    This class is designed to be used with FastAPI's lifespan for
-    connection management across the application lifecycle.
-    """
-
-    def __init__(self) -> None:
-        self._client: MCPClient | None = None
-        self._read_stream: Any = None
-        self._write_stream: Any = None
-        self._session: ClientSession | None = None
-
-    @property
-    def client(self) -> MCPClient | None:
-        """Get the managed MCP client."""
-        return self._client
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if the client is connected."""
-        return self._client is not None and self._client.is_connected
-
-    async def startup(self) -> bool:
-        """Initialize MCP client connection on application startup.
-
-        Returns:
-            True if connection successful
-        """
-        logger.info("Starting MCP client manager")
-
-        try:
-            server_url = settings.mcp.server_url
-
-            # Create SSE connection
-            # Note: We need to maintain the connection outside of async with
-            # for persistent connections in FastAPI lifespan
-            self._client = MCPClient()
-
-            # For demonstration, we'll try a simple connect
-            # In production, you'd want more sophisticated connection management
-            connected = await self._try_connect()
-
-            if connected:
-                logger.info("MCP client manager started successfully")
-            else:
-                logger.warning(
-                    "MCP client manager started but server not available. "
-                    "External tools will be unavailable."
-                )
-
-            return connected
-
-        except Exception as e:
-            logger.error(f"Failed to start MCP client manager: {e}")
-            return False
-
-    async def _try_connect(self) -> bool:
-        """Attempt to connect to MCP server by actually establishing an SSE connection.
-
-        This validates the server is reachable and speaks MCP protocol,
-        rather than assuming a /health endpoint exists.
-        """
-        try:
-            # Actually try to connect via SSE and initialize MCP session
-            # This is the most reliable way to check if the server is available
-            async with sse_client(settings.mcp.server_url) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    # If we can initialize, the server is working
-                    await asyncio.wait_for(
-                        session.initialize(),
-                        timeout=settings.mcp.connection_timeout,
-                    )
-                    logger.info("MCP server connection verified via SSE handshake")
-                    return True
-
-        except asyncio.TimeoutError:
-            logger.warning("MCP server connection timed out")
-            return False
-        except Exception as e:
-            # Server not available, but we can still start the app
-            logger.debug(f"MCP server not reachable: {e}")
-            return False
-
-    async def call_tool(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Call an MCP tool, establishing connection if needed.
+        Automatically reconnects if the connection has been lost.
 
         Args:
             tool_name: Name of the tool to call
             arguments: Tool arguments
 
         Returns:
-            Tool result dictionary
+            Tool result dictionary with 'success' field
         """
-        logger.info(f"Calling MCP tool via manager: {tool_name}")
+        # Ensure we're connected (reconnect if needed)
+        if not await self._ensure_connected():
+            return {
+                "success": False,
+                "error": "Could not establish connection to MCP server",
+            }
+
+        if not self._session:
+            return {
+                "success": False,
+                "error": "MCP session not available",
+            }
+
+        # Check if tool exists
+        if tool_name not in self._tools:
+            available = list(self._tools.keys())
+            return {
+                "success": False,
+                "error": f"Tool '{tool_name}' not found. Available tools: {available}",
+            }
+
+        logger.info(f"Calling MCP tool: {tool_name}")
+        logger.debug(f"Tool arguments: {arguments}")
 
         try:
-            # Establish connection for this call
-            async with sse_client(settings.mcp.server_url) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+            # Call the tool using the persistent session
+            result = await self._session.call_tool(tool_name, arguments)
 
-                    # Call the tool
-                    result = await session.call_tool(tool_name, arguments)
+            # Process result content
+            if result.content:
+                for content in result.content:
+                    if hasattr(content, "text"):
+                        try:
+                            import json
 
-                    # Process result
-                    if result.content:
-                        for content in result.content:
-                            if hasattr(content, "text"):
-                                try:
-                                    import json
+                            response_data = json.loads(content.text)
+                            logger.info(f"MCP tool '{tool_name}' completed successfully")
+                            return {"success": True, **response_data}
 
-                                    return {"success": True, **json.loads(content.text)}
-                                except json.JSONDecodeError:
-                                    return {"success": True, "result": content.text}
+                        except json.JSONDecodeError:
+                            logger.info(f"MCP tool '{tool_name}' completed (non-JSON response)")
+                            return {"success": True, "result": content.text}
 
-                    return {"success": True}
+            logger.info(f"MCP tool '{tool_name}' completed with no content")
+            return {"success": True}
 
         except Exception as e:
             logger.error(f"MCP tool call failed: {e}")
+
+            # Mark as disconnected so next call will attempt reconnection
+            self._connected = False
+
             return {"success": False, "error": str(e)}
 
     async def get_available_tools(self) -> list[dict[str, Any]]:
         """Get available tools from MCP server.
 
+        Uses cached tools from the persistent connection.
+
         Returns:
             List of tool schemas in OpenAI format
         """
-        try:
-            async with sse_client(settings.mcp.server_url) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
-                    tools_result = await session.list_tools()
-
-                    schemas = []
-                    for tool in tools_result.tools:
-                        schemas.append({
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description or f"MCP tool: {tool.name}",
-                                "parameters": tool.inputSchema or {"type": "object", "properties": {}},
-                            },
-                        })
-
-                    return schemas
-
-        except Exception as e:
-            logger.warning(f"Could not fetch MCP tools: {e}")
+        if not await self._ensure_connected():
+            logger.warning("Cannot fetch tools: not connected to MCP server")
             return []
+
+        schemas = []
+        for tool in self._tools.values():
+            schemas.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or f"MCP tool: {tool.name}",
+                    "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+                },
+            })
+
+        return schemas
 
     async def shutdown(self) -> None:
         """Cleanup on application shutdown."""
         logger.info("Shutting down MCP client manager")
-        if self._client:
-            await self._client.disconnect()
-        self._client = None
+        async with self._connection_lock:
+            await self._disconnect_internal()
+        logger.info("MCP client manager shutdown complete")
 
 
 # Global singleton instance
