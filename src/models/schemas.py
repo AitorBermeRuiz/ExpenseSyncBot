@@ -1,7 +1,9 @@
-"""Pydantic schemas for request/response models and internal data structures."""
+"""Pydantic schemas for request/response models and internal data structures.
 
-from datetime import date, datetime
-from decimal import Decimal
+Note: With the OpenAI Agents SDK, tool schemas are auto-generated from
+@function_tool decorated functions. Manual schemas are no longer needed.
+"""
+
 from enum import Enum
 from typing import Any
 
@@ -11,20 +13,22 @@ from pydantic import BaseModel, Field
 class ExpenseCategory(str, Enum):
     """Supported expense categories."""
 
-    ALIMENTACION = "alimentacion"
-    TRANSPORTE = "transporte"
-    ENTRETENIMIENTO = "entretenimiento"
-    SALUD = "salud"
-    HOGAR = "hogar"
-    ROPA = "ropa"
-    TECNOLOGIA = "tecnologia"
-    EDUCACION = "educacion"
-    VIAJES = "viajes"
-    RESTAURANTES = "restaurantes"
-    SUPERMERCADO = "supermercado"
-    SERVICIOS = "servicios"
-    SUSCRIPCIONES = "suscripciones"
-    OTROS = "otros"
+    ALIMENTACION = "Alimentación"
+    TRANSPORTE = "Transporte"
+    OCIO = "Ocio"
+    HOGAR = "Hogar"
+    ROPA = "Ropa"
+    INVERSIONES = "Inversiones"
+    SUSCRIPCIONES = "Suscripciones"
+    OTROS = "Otros"
+    AHORROS = "Ahorros"
+
+
+class MovementType(str, Enum):
+    """Type of financial movement."""
+
+    GASTO = "Gasto"
+    INGRESO = "Ingreso"
 
 
 class ProcessingStatus(str, Enum):
@@ -37,7 +41,7 @@ class ProcessingStatus(str, Enum):
     ERROR = "error"
 
 
-# --- Request/Response Models ---
+# --- Request/Response Models (FastAPI) ---
 class ProcessReceiptRequest(BaseModel):
     """Request body for processing a receipt email."""
 
@@ -77,107 +81,33 @@ class ProcessReceiptResponse(BaseModel):
 
 # --- Internal Data Models ---
 class CategorizedExpense(BaseModel):
-    """Expense data extracted from receipt."""
+    """Expense data extracted from receipt.
 
-    comercio: str = Field(..., description="Merchant/business name")
-    importe: Decimal = Field(..., description="Amount in original currency", gt=0)
-    moneda: str = Field(default="EUR", description="Currency code")
-    fecha: date = Field(..., description="Transaction date")
+    Used internally after categorization, with Spanish format:
+    - Date: DD/MM/YYYY
+    - Amount: comma decimal (362,67)
+    """
+
+    fecha: str = Field(..., description="Transaction date in DD/MM/YYYY format")
+    tipo: MovementType = Field(..., description="Movement type: Gasto or Ingreso")
     categoria: ExpenseCategory = Field(..., description="Expense category")
-    descripcion: str | None = Field(
-        default=None,
-        description="Additional description or notes",
-    )
-    confianza: float = Field(
-        default=1.0,
-        description="Confidence score of categorization (0-1)",
-        ge=0,
-        le=1,
-    )
-
-    class Config:
-        json_encoders = {
-            Decimal: lambda v: float(v),
-            date: lambda v: v.isoformat(),
-        }
+    importe: str = Field(..., description="Amount with Spanish comma decimal (e.g., 362,67)")
+    descripcion: str = Field(..., description="Brief description or merchant name")
 
 
 class ValidationResult(BaseModel):
-    """Result of expense validation."""
+    """Result of expense validation by Gemini."""
 
-    is_valid: bool = Field(..., description="Whether the expense passes validation")
-    error_message: str | None = Field(
+    is_valid: bool = Field(..., description="Whether the categorization is correct")
+    feedback: str | None = Field(
         default=None,
-        description="Error message if validation failed",
+        description="Explanation if categorization is wrong",
     )
-    warnings: list[str] = Field(
-        default_factory=list,
-        description="Non-blocking warnings",
+    corrected_category: str | None = Field(
+        default=None,
+        description="Correct category if original was wrong",
     )
-
-
-# --- Tool Response Models ---
-class CategorizationToolResponse(BaseModel):
-    """Response from categorize_receipt tool."""
-
-    success: bool
-    expense: CategorizedExpense | None = None
-    error: str | None = None
-
-
-class ValidationToolResponse(BaseModel):
-    """Response from validate_expense tool."""
-
-    result: ValidationResult
-
-
-class AddExpenseToolResponse(BaseModel):
-    """Response from MCP AddExpense tool."""
-
-    success: bool
-    expense_id: str | None = None
-    error: str | None = None
-
-
-# --- OpenAI Tool Schemas ---
-CATEGORIZE_RECEIPT_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "categorize_receipt",
-        "description": "Extract and categorize expense information from receipt email text. Use this to parse raw email content into structured expense data.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The raw email body text containing the receipt",
-                },
-                "feedback": {
-                    "type": "string",
-                    "description": "Optional feedback from previous validation failure to guide correction",
-                },
-            },
-            "required": ["text"],
-        },
-    },
-}
-
-VALIDATE_EXPENSE_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "validate_expense",
-        "description": "Validate categorized expense data against business rules. Call this after categorization to ensure data integrity.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "comercio": {"type": "string", "description": "Merchant name"},
-                "importe": {"type": "number", "description": "Amount"},
-                "moneda": {"type": "string", "description": "Currency code"},
-                "fecha": {"type": "string", "description": "Date in ISO format (YYYY-MM-DD)"},
-                "categoria": {"type": "string", "description": "Expense category"},
-                "descripcion": {"type": "string", "description": "Optional description"},
-            },
-            "required": ["comercio", "importe", "fecha", "categoria"],
-        },
-    },
-}
+    corrected_type: str | None = Field(
+        default=None,
+        description="Correct type if original was wrong",
+    )

@@ -1,11 +1,12 @@
-"""LLM client management following the registry pattern.
+"""LLM client management for OpenAI Agents SDK.
 
-This module provides a centralized way to create and manage OpenAI-compatible
-clients for different LLM providers.
+This module provides a centralized way to create OpenAIChatCompletionsModel
+instances for different LLM providers using the agents SDK.
 """
 
 import os
 
+from agents import OpenAIChatCompletionsModel
 from loguru import logger
 from openai import AsyncOpenAI
 
@@ -13,26 +14,27 @@ from src.core.configs import AVAILABLE_LLMS, LLMConfig, LLMProvider
 
 
 class LLMManager:
-    """Manages OpenAI-compatible client instances for different LLM providers.
+    """Manages OpenAIChatCompletionsModel instances for different LLM providers.
 
-    Uses the registry pattern from configs.py to dynamically create clients
-    for any configured provider.
+    Uses the registry pattern from configs.py to dynamically create models
+    for any configured provider, compatible with the OpenAI Agents SDK.
     """
 
     def __init__(self) -> None:
+        self._models: dict[str, OpenAIChatCompletionsModel] = {}
         self._clients: dict[str, AsyncOpenAI] = {}
 
-    def get_client(self, provider: LLMProvider) -> AsyncOpenAI | None:
-        """Get or create an AsyncOpenAI client for the specified provider.
+    def get_model(self, provider: LLMProvider) -> OpenAIChatCompletionsModel | None:
+        """Get or create an OpenAIChatCompletionsModel for the specified provider.
 
         Args:
             provider: The LLM provider key from AVAILABLE_LLMS
 
         Returns:
-            AsyncOpenAI client configured for the provider, or None if API key missing
+            OpenAIChatCompletionsModel configured for the provider, or None if API key missing
         """
-        if provider in self._clients:
-            return self._clients[provider]
+        if provider in self._models:
+            return self._models[provider]
 
         config = AVAILABLE_LLMS.get(provider)
         if not config:
@@ -47,14 +49,36 @@ class LLMManager:
             )
             return None
 
+        # Create AsyncOpenAI client for the provider
         client = AsyncOpenAI(
             api_key=api_key,
             base_url=config.base_url,
         )
         self._clients[provider] = client
-        logger.info(f"Created LLM client for provider: {provider}")
 
-        return client
+        # Create OpenAIChatCompletionsModel wrapper for agents SDK
+        model = OpenAIChatCompletionsModel(
+            model=config.model_name,
+            openai_client=client,
+        )
+        self._models[provider] = model
+        logger.info(f"Created agents SDK model for provider: {provider} ({config.model_name})")
+
+        return model
+
+    def get_client(self, provider: LLMProvider) -> AsyncOpenAI | None:
+        """Get or create an AsyncOpenAI client for the specified provider.
+
+        Args:
+            provider: The LLM provider key from AVAILABLE_LLMS
+
+        Returns:
+            AsyncOpenAI client configured for the provider, or None if API key missing
+        """
+        # Ensure model is created first (which also creates the client)
+        if provider not in self._clients:
+            self.get_model(provider)
+        return self._clients.get(provider)
 
     def get_model_name(self, provider: LLMProvider) -> str | None:
         """Get the model name for a provider.

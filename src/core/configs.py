@@ -4,6 +4,7 @@ This module provides:
 - LLM provider registry with dynamic configuration
 - Application settings via Pydantic Settings
 - MCP server configuration
+- Integration with OpenAI Agents SDK
 """
 
 import os
@@ -36,7 +37,7 @@ AVAILABLE_LLMS: dict[str, LLMConfig] = {
         api_key_env_var="OPENAI_API_KEY",
     ),
     "gemini": LLMConfig(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-2.5-flash",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         api_key_env_var="GOOGLE_API_KEY",
     ),
@@ -88,7 +89,10 @@ class OrchestratorSettings(BaseModel):
         default="openai", description="LLM provider for orchestrator"
     )
     categorizer_provider: LLMProvider = Field(
-        default="groq-fast", description="LLM provider for categorization (fast model)"
+        default="openai", description="LLM provider for categorization (GPT)"
+    )
+    validator_provider: LLMProvider = Field(
+        default="gemini", description="LLM provider for validation (Gemini)"
     )
 
 

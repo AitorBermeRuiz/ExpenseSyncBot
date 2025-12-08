@@ -1,37 +1,46 @@
-# ExpenseSyncBot
+# ExpenseSyncBot v2.0
 
-Agent-based expense automation API with MCP integration. This service processes receipt emails, extracts expense data using AI, and persists it via an external MCP server.
+Agent-based expense automation API built with **OpenAI Agents SDK** and MCP integration. This service processes receipt emails, extracts expense data using AI agents, and persists it via an external MCP server.
 
 ## Architecture
 
 ```
-┌─────────────┐     POST /process-receipt     ┌────────────────────────┐
-│    n8n      │ ─────────────────────────────▶│   FastAPI Service      │
-│  (Trigger)  │                               │                        │
-└─────────────┘                               │  ┌──────────────────┐  │
-                                              │  │   Orchestrator   │  │
-                                              │  │      Agent       │  │
-                                              │  └────────┬─────────┘  │
-                                              │           │            │
-                                              │     ┌─────┴─────┐      │
-                                              │     │           │      │
-                                              │  ┌──▼───┐  ┌────▼───┐  │
-                                              │  │Categ.│  │Validate│  │
-                                              │  │ Tool │  │  Tool  │  │
-                                              │  └──────┘  └────────┘  │
-                                              └───────────┬────────────┘
-                                                          │ MCP/SSE
-                                              ┌───────────▼────────────┐
-                                              │   C# MCP Server        │
-                                              │   (AddExpense tool)    │
-                                              └────────────────────────┘
+┌─────────────┐     POST /process-receipt     ┌─────────────────────────────────┐
+│    n8n      │ ─────────────────────────────▶│      FastAPI Service            │
+│  (Trigger)  │                               │                                 │
+└─────────────┘                               │  ┌───────────────────────────┐  │
+                                              │  │  Categorizer Agent        │  │
+                                              │  │  (Agent + Runner.run)     │  │
+                                              │  │  output_type: Expense     │  │
+                                              │  └─────────────┬─────────────┘  │
+                                              │                │                │
+                                              │  ┌─────────────▼─────────────┐  │
+                                              │  │     @function_tool        │  │
+                                              │  │  ┌─────────┐ ┌─────────┐  │  │
+                                              │  │  │validate │ │add_mcp  │  │  │
+                                              │  │  │_expense │ │_expense │  │  │
+                                              │  │  └─────────┘ └────┬────┘  │  │
+                                              │  └───────────────────┼──────┘  │
+                                              └──────────────────────┼─────────┘
+                                                                     │ MCP/SSE
+                                              ┌──────────────────────▼─────────┐
+                                              │      C# MCP Server             │
+                                              │      (AddExpense tool)         │
+                                              └────────────────────────────────┘
 ```
+
+## What's New in v2.0
+
+- **OpenAI Agents SDK**: Replaced manual conversation loops with declarative `Agent` and `Runner.run()`
+- **@function_tool decorator**: Auto-generated tool schemas from Python functions
+- **Structured outputs**: `output_type=ExtractedExpense` for type-safe agent responses
+- **Simplified architecture**: No more manual message history management
 
 ## Features
 
-- **AI-powered categorization**: Extracts expense data from noisy email content (HTML, signatures, etc.)
-- **Validation with correction loop**: Validates extracted data and retries with feedback on failure
-- **Multi-provider LLM support**: OpenAI, Gemini, DeepSeek, Groq
+- **AI-powered categorization**: Uses `Agent[ExtractedExpense]` with structured output
+- **Validation with correction loop**: `@function_tool` validates and retries with feedback
+- **Multi-provider LLM support**: OpenAI, Gemini, DeepSeek, Groq via registry pattern
 - **MCP integration**: Connects to external MCP servers via SSE for persistence
 - **Production-ready**: Modular architecture, logging, health checks
 
@@ -40,27 +49,20 @@ Agent-based expense automation API with MCP integration. This service processes 
 ```
 ExpenseSyncBot/
 ├── src/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI app with lifespan
+│   ├── main.py                 # FastAPI app with lifespan
 │   ├── core/
-│   │   ├── __init__.py
-│   │   ├── configs.py       # LLM registry + settings
-│   │   ├── logging.py       # Loguru configuration
-│   │   └── llm_manager.py   # LLM client management
+│   │   ├── configs.py          # LLM registry + settings
+│   │   ├── logging.py          # Loguru configuration
+│   │   └── llm_manager.py      # LLM client management
 │   ├── models/
-│   │   ├── __init__.py
-│   │   └── schemas.py       # Pydantic models
+│   │   └── schemas.py          # Pydantic models (API only, no tool schemas)
 │   ├── agents/
-│   │   ├── __init__.py
-│   │   ├── prompts.py       # System prompts
-│   │   ├── tools.py         # Internal Python tools
-│   │   └── orchestrator.py  # Main orchestration logic
+│   │   ├── prompts.py          # System prompts + MERCHANT_HINTS
+│   │   ├── tools.py            # @function_tool decorated tools
+│   │   └── orchestrator.py     # Agent definitions + Runner.run workflow
 │   └── services/
-│       ├── __init__.py
-│       └── mcp_client.py    # MCP SSE client
-├── tests/
-├── .env.example
-├── pyproject.toml
+│       └── mcp_client.py       # MCP SSE client
+├── pyproject.toml              # Dependencies including openai-agents
 └── README.md
 ```
 
@@ -75,7 +77,7 @@ cd ExpenseSyncBot
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
+# Install dependencies (includes openai-agents SDK)
 pip install -e .
 
 # Or with uv
@@ -133,14 +135,15 @@ Response:
 ```json
 {
   "status": "success",
-  "message": "Recibo procesado exitosamente",
+  "message": "Recibo procesado exitosamente y guardado en el sistema",
   "data": {
     "comercio": "Amazon",
     "importe": 29.99,
     "moneda": "EUR",
     "fecha": "2024-12-06",
     "categoria": "tecnologia",
-    "descripcion": "Echo Dot"
+    "descripcion": "Echo Dot",
+    "persisted": true
   },
   "attempts": 1,
   "errors": []
@@ -158,7 +161,125 @@ GET /health/detailed
 GET /tools
 ```
 
-### n8n Integration
+Returns:
+```json
+{
+  "internal_tools": [
+    "categorize_receipt",
+    "validate_expense",
+    "format_expense_for_persistence",
+    "add_expense_mcp"
+  ],
+  "mcp_tools": ["AddExpense"],
+  "total": 5,
+  "architecture": "OpenAI Agents SDK"
+}
+```
+
+## OpenAI Agents SDK Patterns
+
+### Agent Definition with Structured Output
+
+```python
+from agents import Agent, Runner, ModelSettings
+
+class ExtractedExpense(BaseModel):
+    comercio: str
+    importe: float
+    fecha: str
+    categoria: str
+    # ...
+
+categorizer = Agent[ExtractedExpense](
+    name="CategorizadorRecibos",
+    instructions="...",
+    model=model,
+    model_settings=ModelSettings(temperature=0.1),
+    output_type=ExtractedExpense,  # Automatic JSON schema
+)
+
+# Run the agent
+result = await Runner.run(categorizer, "Extrae datos de: ...")
+expense = result.final_output  # Type: ExtractedExpense
+```
+
+### Function Tools with @function_tool
+
+```python
+from agents import function_tool
+
+@function_tool
+def validate_expense(
+    comercio: str,
+    importe: float,
+    fecha: str,
+    categoria: str,
+    moneda: str = "EUR",
+) -> str:
+    """Validate expense data against business rules.
+
+    Args:
+        comercio: Merchant name
+        importe: Amount
+        fecha: Date in YYYY-MM-DD
+        categoria: Category
+        moneda: Currency code
+
+    Returns:
+        JSON with is_valid, error_message, warnings
+    """
+    # Validation logic...
+    return result.model_dump_json()
+```
+
+### Multi-Provider Model Factory
+
+```python
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+
+def _create_model(provider: str) -> OpenAIChatCompletionsModel:
+    config = AVAILABLE_LLMS[provider]  # From registry
+    client = AsyncOpenAI(
+        api_key=os.getenv(config.api_key_env_var),
+        base_url=config.base_url,
+    )
+    return OpenAIChatCompletionsModel(
+        model=config.model_name,
+        openai_client=client,
+    )
+```
+
+## LLM Providers
+
+| Provider | Model | Use Case |
+|----------|-------|----------|
+| `openai` | gpt-4o-mini | Default orchestrator |
+| `openai-gpt4` | gpt-4o | Higher accuracy |
+| `gemini` | gemini-2.5-flash | Alternative |
+| `deepseek` | deepseek-chat | Cost-effective |
+| `groq` | llama-3.3-70b | Fast inference |
+| `groq-fast` | llama-3.1-8b | Very fast, categorization |
+
+## Processing Flow
+
+```
+1. Receipt arrives → n8n POST to /process-receipt
+
+2. Categorizer Agent (Runner.run)
+   └─> ExtractedExpense (structured output)
+
+3. validate_expense (@function_tool)
+   └─> {is_valid, error_message, warnings}
+
+4. If invalid → Re-run categorizer with feedback (max 3 attempts)
+
+5. If valid → add_expense_mcp (@function_tool)
+   └─> MCP SSE → C# Server → Database
+
+6. Return ProcessReceiptResponse to n8n
+```
+
+## n8n Integration
 
 In your n8n workflow:
 
@@ -174,28 +295,6 @@ In your n8n workflow:
        "sender": "{{ $json.from }}"
      }
      ```
-
-## LLM Providers
-
-The system supports multiple LLM providers through a registry pattern:
-
-| Provider | Model | Use Case |
-|----------|-------|----------|
-| `openai` | gpt-4o-mini | Default orchestrator |
-| `openai-gpt4` | gpt-4o | Higher accuracy |
-| `gemini` | gemini-2.0-flash | Alternative |
-| `deepseek` | deepseek-chat | Cost-effective |
-| `groq` | llama-3.3-70b | Fast inference |
-| `groq-fast` | llama-3.1-8b | Very fast, categorization |
-
-## Processing Flow
-
-1. **Receipt arrives** → n8n sends POST to `/process-receipt`
-2. **Orchestrator** → Coordinates the workflow
-3. **Categorize** → AI extracts: merchant, amount, date, category
-4. **Validate** → Checks business rules (amount > 0, valid date, etc.)
-5. **Correction Loop** → If validation fails, retry with feedback (max 3 attempts)
-6. **Persist** → Call MCP `AddExpense` tool to save
 
 ## Development
 
@@ -213,6 +312,17 @@ mypy src/
 ruff check src/
 ruff format src/
 ```
+
+## Migration from v1.0
+
+If upgrading from v1.0 (manual conversation loops):
+
+1. **Dependencies**: Add `openai-agents>=0.0.3` to requirements
+2. **Tools**: Replace manual JSON schemas with `@function_tool` decorators
+3. **Orchestrator**: Replace `while` loop with `Runner.run(agent, prompt)`
+4. **Outputs**: Use `output_type=Model` for structured agent responses
+
+The FastAPI interface (`OrchestratorAgent.process_receipt()`) remains unchanged.
 
 ## License
 
