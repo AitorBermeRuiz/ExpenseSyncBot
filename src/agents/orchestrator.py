@@ -21,6 +21,11 @@ Pattern:
 from agents import Agent, Runner, ModelSettings, WebSearchTool, trace
 from loguru import logger
 
+from src.agents.constants import (
+    TOOL_CATEGORIZE_EXPENSE,
+    TOOL_SAVE_EXPENSE,
+    TOOL_VALIDATE_CATEGORIZATION,
+)
 from src.agents.prompts import (
     CATEGORIZER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -145,7 +150,7 @@ def create_expense_orchestrator() -> Agent:
 
     # Convert agents to tools using .as_tool()
     categorizer_tool = categorizer_agent.as_tool(
-        tool_name="categorize_expense",
+        tool_name=TOOL_CATEGORIZE_EXPENSE,
         tool_description=(
             "Extrae y categoriza los datos de un gasto desde el texto de un email/notificación bancaria. "
             "Devuelve un objeto estructurado con: fecha (DD/MM/YYYY), tipo (Gasto/Ingreso), categoria, importe (con coma decimal), descripcion. "
@@ -156,7 +161,7 @@ def create_expense_orchestrator() -> Agent:
     )
 
     validator_tool = validator_agent.as_tool(
-        tool_name="validate_categorization",
+        tool_name=TOOL_VALIDATE_CATEGORIZATION,
         tool_description=(
             "Valida si la categorización de un gasto es correcta según las reglas de negocio. "
             "Pásale los datos del gasto: descripcion, categoria, tipo. "
@@ -165,7 +170,7 @@ def create_expense_orchestrator() -> Agent:
     )
 
     persistence_tool = persistence_agent.as_tool(
-        tool_name="save_expense",
+        tool_name=TOOL_SAVE_EXPENSE,
         tool_description=(
             "Guarda un gasto validado en Google Sheets. "
             "Pásale los datos completos del gasto: fecha, tipo, categoria, importe, descripcion. "
