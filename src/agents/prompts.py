@@ -19,7 +19,7 @@ def load_business_rules() -> str:
     return "No se encontraron reglas de negocio."
 
 
-# --- CATEGORIZER AGENT (GPT) ---
+# --- CATEGORIZER AGENT (GPT) with Structured Output ---
 CATEGORIZER_SYSTEM_PROMPT = """Eres un experto en categorizar gastos e ingresos a partir de información bancaria o recibos.
 
 ## Tu Tarea
