@@ -21,18 +21,18 @@ Pattern:
 from agents import Agent, Runner, ModelSettings, WebSearchTool, trace
 from loguru import logger
 
-from src.agents.constants import (
+from src.expense_agents.constants import (
     TOOL_CATEGORIZE_EXPENSE,
     TOOL_SAVE_EXPENSE,
     TOOL_VALIDATE_CATEGORIZATION,
 )
-from src.agents.prompts import (
+from src.expense_agents.prompts import (
     CATEGORIZER_SYSTEM_PROMPT,
     ORCHESTRATOR_SYSTEM_PROMPT,
     PERSISTENCE_SYSTEM_PROMPT,
     get_validator_prompt,
 )
-from src.agents.tools import get_ranges, write_range
+from src.expense_agents.tools import get_ranges, write_range
 from src.core.configs import settings
 from src.core.llm_manager import llm_manager
 from src.models.schemas import (
@@ -182,8 +182,8 @@ def create_expense_orchestrator() -> Agent:
     tools = [
         categorizer_tool,      # Agent as tool (.as_tool())
         validator_tool,        # Agent as tool (.as_tool())
-        persistence_tool,      # Agent as tool (.as_tool())
-        WebSearchTool(),       # For unknown merchants
+        persistence_tool       # Agent as tool (.as_tool())
+                               # For unknown merchants
     ]
 
     # Get orchestrator model

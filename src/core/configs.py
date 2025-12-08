@@ -125,6 +125,15 @@ class Settings(BaseSettings):
     # Orchestrator Settings
     orchestrator: OrchestratorSettings = Field(default_factory=OrchestratorSettings)
 
+    # LLM API Keys
+    # These fields allow Pydantic to load API keys from the environment (.env)
+    # into the `settings` object so other modules can read them without
+    # parsing the .env file directly.
+    openai_api_key: str | None = Field(default=None, env="OPENAI_API_KEY")
+    google_api_key: str | None = Field(default=None, env="GOOGLE_API_KEY")
+    deepseek_api_key: str | None = Field(default=None, env="DEEPSEEK_API_KEY")
+    groq_api_key: str | None = Field(default=None, env="GROQ_API_KEY")
+
 
 # Global settings instance
 settings = Settings()

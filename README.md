@@ -56,7 +56,7 @@ ExpenseSyncBot/
 │   │   └── llm_manager.py      # LLM client management
 │   ├── models/
 │   │   └── schemas.py          # Pydantic models (API only, no tool schemas)
-│   ├── agents/
+│   ├── expense_agents/
 │   │   ├── prompts.py          # System prompts + MERCHANT_HINTS
 │   │   ├── tools.py            # @function_tool decorated tools
 │   │   └── orchestrator.py     # Agent definitions + Runner.run workflow
