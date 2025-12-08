@@ -79,20 +79,52 @@ class ProcessReceiptResponse(BaseModel):
     )
 
 
-# --- Internal Data Models ---
+# --- Internal Data Models (Structured Outputs) ---
 class CategorizedExpense(BaseModel):
-    """Expense data extracted from receipt.
+    """Expense data extracted from a receipt or bank notification.
 
-    Used internally after categorization, with Spanish format:
-    - Date: DD/MM/YYYY
-    - Amount: comma decimal (362,67)
+    This model is used as output_type for the Categorizer Agent,
+    ensuring structured and validated output from the LLM.
     """
 
-    fecha: str = Field(..., description="Transaction date in DD/MM/YYYY format")
-    tipo: MovementType = Field(..., description="Movement type: Gasto or Ingreso")
-    categoria: ExpenseCategory = Field(..., description="Expense category")
-    importe: str = Field(..., description="Amount with Spanish comma decimal (e.g., 362,67)")
-    descripcion: str = Field(..., description="Brief description or merchant name")
+    fecha: str = Field(
+        ...,
+        description=(
+            "Fecha de la transacción en formato DD/MM/YYYY. "
+            "Ejemplo: '05/11/2025'. Si no hay fecha en el texto, usa la fecha actual."
+        ),
+    )
+    tipo: MovementType = Field(
+        ...,
+        description=(
+            "Tipo de movimiento: 'Gasto' si es un pago/cargo/compra, "
+            "'Ingreso' si es dinero recibido (bizum recibido, transferencia entrante, etc.)"
+        ),
+    )
+    categoria: ExpenseCategory = Field(
+        ...,
+        description=(
+            "Categoría del gasto/ingreso. Opciones: Alimentación (supermercados), "
+            "Transporte (gasolina, parking, taxi), Ocio (restaurantes, cine, deportes), "
+            "Hogar (muebles, limpieza), Ropa (textil, calzado), Inversiones (libros, cursos), "
+            "Suscripciones (Netflix, Spotify, iCloud), Ahorros (transferencias a ahorro), "
+            "Otros (si no encaja en ninguna)."
+        ),
+    )
+    importe: str = Field(
+        ...,
+        description=(
+            "Importe con coma decimal española, sin símbolo de moneda. "
+            "Ejemplos: '15,67', '362,00', '2,99'. Solo el número."
+        ),
+    )
+    descripcion: str = Field(
+        ...,
+        description=(
+            "Descripción breve: nombre del comercio o concepto del movimiento. "
+            "Ejemplos: 'MERCADONA', 'Bizum Paula', 'Apple iCloud', 'Nómina Empresa'."
+        ),
+    )
 
 
 class ValidationResult(BaseModel):

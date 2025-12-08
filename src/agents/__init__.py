@@ -37,7 +37,6 @@ from src.agents.prompts import (
 )
 from src.agents.tools import (
     get_ranges,
-    validate_expense,
     write_range,
 )
 
@@ -56,8 +55,7 @@ __all__ = [
     "PERSISTENCE_SYSTEM_PROMPT",
     "get_validator_prompt",
     "load_business_rules",
-    # Tools
+    # MCP Tools
     "get_ranges",
     "write_range",
-    "validate_expense",
 ]

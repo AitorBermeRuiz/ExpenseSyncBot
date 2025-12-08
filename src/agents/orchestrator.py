@@ -40,13 +40,16 @@ from src.models.schemas import (
 
 # --- Specialized Agents ---
 def create_categorizer_agent() -> Agent:
-    """Create the receipt categorizer agent (GPT).
+    """Create the receipt categorizer agent (GPT) with Structured Output.
 
     This agent specializes in extracting structured expense data from
     messy receipt emails (HTML, signatures, noise) and categorizing them.
 
+    Uses output_type=CategorizedExpense to enforce structured, validated output
+    directly from the LLM, eliminating manual JSON parsing.
+
     Returns:
-        Agent configured with GPT model for categorization
+        Agent configured with GPT model for categorization and structured output
     """
     provider = settings.orchestrator.categorizer_provider
     model = llm_manager.get_model(provider)
@@ -62,6 +65,7 @@ def create_categorizer_agent() -> Agent:
         instructions=CATEGORIZER_SYSTEM_PROMPT,
         model=model,
         model_settings=ModelSettings(temperature=0.1),
+        output_type=CategorizedExpense,
         output_type=CategorizedExpense,
     )
 
@@ -144,8 +148,10 @@ def create_expense_orchestrator() -> Agent:
         tool_name="categorize_expense",
         tool_description=(
             "Extrae y categoriza los datos de un gasto desde el texto de un email/notificación bancaria. "
-            "Devuelve: fecha (DD/MM/YYYY), tipo (Gasto/Ingreso), categoria, importe (con coma decimal), descripcion. "
-            "Pásale el contenido completo del email o notificación."
+            "Devuelve un objeto estructurado con: fecha (DD/MM/YYYY), tipo (Gasto/Ingreso), categoria, importe (con coma decimal), descripcion. "
+            "Pásale el contenido completo del email o notificación. "
+            "Si la validación falla, llama de nuevo a esta herramienta pasando el mensaje de error (feedback) "
+            "junto con el texto original para corregirlo. Formato: 'FEEDBACK: [mensaje de error]\\nTEXTO ORIGINAL: [texto]'"
         ),
     )
 
