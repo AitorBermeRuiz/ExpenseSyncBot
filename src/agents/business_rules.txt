@@ -1,0 +1,82 @@
+# REGLAS DE CATEGORIZACIÓN DE GASTOS
+
+## CATEGORÍAS DISPONIBLES
+- Alimentación
+- Transporte
+- Ocio
+- Hogar
+- Ropa
+- Inversiones
+- Suscripciones
+- Otros
+- Ahorros
+
+## TIPOS DE MOVIMIENTO
+- Gasto
+- Ingreso
+
+---
+
+## ESTABLECIMIENTOS Y TIENDAS
+
+### Supermercados y Alimentación
+- **T175 VILLA DEL PRADO** = LA DESPENSA → Alimentación
+- **MORERE FERREUS** = Supermercado UNICO → Alimentación o Hogar (según contexto de compra)
+
+### Cafeterías y Restaurantes
+- **SOLONATURE S.L** → Ocio (café/desayuno trabajo)
+- **NATIONALE NEDERLANDEN** → Ocio (café/desayuno trabajo)
+- **DELIKIA SP** → Ocio (máquinas vending)
+- **SUMO DIVERSO S** → Ocio (restaurante)
+- **TIERRA XANADU** → Ocio (centro comercial/restaurante)
+- **ALFILERITOS 24** → Ocio (restaurante en Toledo)
+- **H10** → Ocio (restaurante/hotel)
+- **THE BAKEHOUSE** → Ocio (cafetería social)
+
+### Casos Especiales
+- **ESTANCO** → Alimentación (agua/bebidas)
+- **TIENDA COMESTIBLES** → Ocio (eventos/cumpleaños)
+- **CARNICAS 3 METROS** → Ocio (eventos/cumpleaños)
+- **APPLE.COM/BILL** → Suscripciones (iCloud)
+- **AYTO. VILLA DE.** → Ocio (gimnasio municipal)
+
+### Transporte
+- **UTE DEVAS II** → Transporte (transporte público)
+- **TVR EMV MADRID** → Transporte (parking)
+- **AYTO MADRID PAGO INTERNET** → Transporte (parking)
+- **EasyPark** → Transporte
+- Gasolineras (PLENOIL, BALLENOIL, CASTRO OIL, etc.) → Transporte
+
+### Suscripciones conocidas
+- **APPLE.COM/BILL** → Suscripciones (iCloud)
+- **NETFLIX** → Suscripciones
+- **SPOTIFY** → Suscripciones
+- **HBO** → Suscripciones
+- **AMAZON PRIME** → Suscripciones
+- **TIME2PADEL** → Ocio (deporte)
+
+### Renting y vehículos
+- **Volkswagen Renting** → Transporte
+- **ALD AUTOMOTIVE** → Transporte
+
+---
+
+## REGLAS OPERATIVAS
+
+### Categorización especial
+- **Libros** → Inversiones
+- **Cursos** → Inversiones
+- **Electrónicos** → Otros
+- **Tasas municipales** → Hogar u Otros
+- **Bizums sin concepto** → Otros (si es ingreso) / preguntar (si es gasto)
+- **Fisioterapeuta** → Otros
+- **GoCardless** → Otros (comisiones bancarias)
+
+### Casos ambiguos
+- Si no es identificable → "Otros"
+- Si hay duda, buscar en internet el nombre del TPV/comercio
+
+### Formato de datos
+- Fecha: DD/MM/YYYY
+- Importe: con coma decimal española (ej: "362,67")
+- Columnas: Fecha, Tipo, Categoría, Importe, Descripción

@@ -135,7 +135,7 @@ class MCPClient:
         Raises:
             RuntimeError: If not connected or tool not found
         """
-        if not self.is_connected:
+        if not self.is_connected or self._session is None:
             raise RuntimeError("Not connected to MCP server")
 
         if tool_name not in self._tools:

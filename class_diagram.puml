@@ -1,0 +1,289 @@
+@startuml ExpenseSyncBot Class Diagram
+
+!define LIGHTYELLOW #FFFACD
+!define LIGHTBLUE #E6F3FF
+!define LIGHTGREEN #E8F5E9
+!define LIGHTPINK #FFE6F0
+!define LIGHTGRAY #F5F5F5
+
+skinparam class {
+    BackgroundColor LIGHTYELLOW
+    BorderColor Black
+    ArrowColor Black
+}
+
+package "models" LIGHTBLUE {
+    enum ExpenseCategory {
+        alimentacion
+        transporte
+        entretenimiento
+        salud
+        hogar
+        ropa
+        tecnologia
+        educacion
+        viajes
+        restaurantes
+        supermercado
+        servicios
+        suscripciones
+        otros
+    }
+
+    enum ProcessingStatus {
+        success
+        validation_failed
+        categorization_failed
+        mcp_error
+        error
+    }
+
+    class ProcessReceiptRequest {
+        +email_body: str
+        +email_subject: str | None
+        +sender: str | None
+    }
+
+    class ProcessReceiptResponse {
+        +status: ProcessingStatus
+        +message: str
+        +data: dict[str, Any] | None
+        +attempts: int
+        +errors: list[str]
+    }
+
+    class CategorizedExpense {
+        +comercio: str
+        +importe: Decimal
+        +moneda: str
+        +fecha: date
+        +categoria: ExpenseCategory
+        +descripcion: str | None
+        +confianza: float
+        --
+        +dict(): dict
+    }
+
+    class ValidationResult {
+        +is_valid: bool
+        +error_message: str | None
+        +warnings: list[str]
+    }
+
+    class CategorizationToolResponse {
+        +success: bool
+        +expense: CategorizedExpense | None
+        +error: str | None
+    }
+
+    class ValidationToolResponse {
+        +result: ValidationResult
+    }
+
+    class AddExpenseToolResponse {
+        +success: bool
+        +expense_id: str | None
+        +error: str | None
+    }
+}
+
+package "core" LIGHTGREEN {
+    class LLMConfig {
+        +model_name: str
+        +base_url: str
+        +api_key_env_var: str
+    }
+
+    class MCPSettings {
+        +server_url: str
+        +connection_timeout: float
+        +retry_attempts: int
+        +retry_delay: float
+    }
+
+    class OrchestratorSettings {
+        +max_correction_attempts: int
+        +llm_provider: LLMProvider
+        +categorizer_provider: LLMProvider
+    }
+
+    class Settings {
+        +api_host: str
+        +api_port: int
+        +debug: bool
+        +log_level: str
+        +mcp: MCPSettings
+        +orchestrator: OrchestratorSettings
+        +openai_api_key: str | None
+        +google_api_key: str | None
+        +deepseek_api_key: str | None
+        +groq_api_key: str | None
+    }
+
+    class LLMManager {
+        -_clients: dict[str, AsyncOpenAI]
+        --
+        +get_client(provider): AsyncOpenAI | None
+        +get_model_name(provider): str | None
+        +get_config(provider): LLMConfig | None
+        +available_providers(): list[str]
+        +is_provider_configured(provider): bool
+    }
+
+    class "AVAILABLE_LLMS" as AvailableLLMs <<Registry>> {
+        +openai: LLMConfig
+        +openai-gpt4: LLMConfig
+        +gemini: LLMConfig
+        +deepseek: LLMConfig
+        +groq: LLMConfig
+        +groq-fast: LLMConfig
+    }
+}
+
+package "agents" LIGHTPINK {
+    class OrchestratorAgent {
+        -_orchestrator_provider: LLMProvider
+        -_categorizer_provider: LLMProvider
+        -_max_attempts: int
+        -_orchestrator_client: AsyncOpenAI
+        -_categorizer_client: AsyncOpenAI
+        -_orchestrator_model: str
+        -_categorizer_model: str
+        --
+        -async _get_tools(): list[dict]
+        -async _execute_tool(tool_call, email_text, current_expense): tuple
+        +async process_receipt(email_body, email_subject, sender): ProcessReceiptResponse
+    }
+
+    class "categorize_receipt()" as CategorizeTool <<Function>> {
+        +async categorize_receipt(client, model, text, feedback): CategorizationToolResponse
+    }
+
+    class "validate_expense()" as ValidateTool <<Function>> {
+        +validate_expense(expense): ValidationToolResponse
+    }
+
+    class "validate_expense_from_dict()" as ValidateDictTool <<Function>> {
+        +validate_expense_from_dict(data): ValidationToolResponse
+    }
+
+    class "Prompts" as PromptsModule <<Module>> {
+        +ORCHESTRATOR_SYSTEM_PROMPT: str
+        +CATEGORIZER_SYSTEM_PROMPT: str
+        +MERCHANT_HINTS: dict
+    }
+}
+
+package "services" LIGHTGRAY {
+    class MCPClient {
+        -_session: ClientSession | None
+        -_tools: dict[str, Tool]
+        -_connected: bool
+        -_server_url: str
+        --
+        +is_connected: bool
+        +available_tools: list[str]
+        +get_tool_schema(tool_name): dict | None
+        +get_all_tool_schemas(): list[dict]
+        +async connect(): bool
+        +async call_tool(tool_name, arguments): dict
+        +async disconnect(): None
+    }
+
+    class MCPClientManager {
+        -_client: MCPClient | None
+        -_read_stream: Any
+        -_write_stream: Any
+        -_session: ClientSession | None
+        --
+        +client: MCPClient | None
+        +is_connected: bool
+        +async startup(): bool
+        -async _try_connect(): bool
+        +async call_tool(tool_name, arguments): dict
+        +async get_available_tools(): list[dict]
+        +async shutdown(): None
+    }
+}
+
+package "main" {
+    class "FastAPI Application" as FastAPIApp <<Application>> {
+        +GET /health: health_check()
+        +GET /health/detailed: detailed_health_check()
+        +POST /process-receipt: process_receipt()
+        +GET /tools: list_available_tools()
+        --
+        +lifespan(): AsyncContextManager
+    }
+}
+
+' Relationships - Settings and Configuration
+Settings *-- MCPSettings : contains
+Settings *-- OrchestratorSettings : contains
+LLMManager o-- AvailableLLMs : uses
+AvailableLLMs *-- LLMConfig : contains
+
+' Relationships - Models
+CategorizedExpense --> ExpenseCategory : uses
+ProcessReceiptResponse --> ProcessingStatus : uses
+ProcessReceiptResponse o-- CategorizedExpense : contains
+CategorizationToolResponse o-- CategorizedExpense : contains
+ValidationToolResponse *-- ValidationResult : contains
+
+' Relationships - Orchestrator and Services
+OrchestratorAgent --> LLMManager : uses
+OrchestratorAgent --> MCPClientManager : uses
+OrchestratorAgent --> CategorizeTool : calls
+OrchestratorAgent --> ValidateDictTool : calls
+OrchestratorAgent --> PromptsModule : uses
+OrchestratorAgent ..> ProcessReceiptResponse : creates
+OrchestratorAgent ..> ProcessReceiptRequest : receives
+
+' Relationships - Tools
+CategorizeTool ..> CategorizationToolResponse : returns
+CategorizeTool --> CategorizedExpense : creates
+CategorizeTool --> PromptsModule : uses
+ValidateTool ..> ValidationToolResponse : returns
+ValidateTool --> CategorizedExpense : validates
+ValidateDictTool --> ValidateTool : calls
+
+' Relationships - MCP Service
+MCPClientManager *-- MCPClient : manages
+MCPClientManager --> MCPSettings : uses
+MCPClient ..> AddExpenseToolResponse : returns (via tool call)
+
+' Relationships - FastAPI
+FastAPIApp --> OrchestratorAgent : depends on
+FastAPIApp --> MCPClientManager : uses
+FastAPIApp ..> ProcessReceiptRequest : receives
+FastAPIApp ..> ProcessReceiptResponse : returns
+
+' Notes
+note right of OrchestratorAgent
+  Main workflow orchestration:
+  1. Categorize receipt
+  2. Validate expense
+  3. Correct if needed (max 3 attempts)
+  4. Persist via MCP
+  5. Return response
+end note
+
+note right of MCPClient
+  Connects to external MCP server
+  via SSE (Server-Sent Events)
+  for expense persistence
+end note
+
+note bottom of AvailableLLMs
+  Singleton registry for
+  LLM providers: OpenAI,
+  Gemini, Deepseek, Groq
+end note
+
+note right of Settings
+  Global configuration loaded
+  from environment variables.
+  Singleton instance.
+end note
+
+@enduml

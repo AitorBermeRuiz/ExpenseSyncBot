@@ -1,281 +1,323 @@
-"""Internal Python tools for the orchestrator agent.
+"""Function tools for the expense processing agents.
 
-These tools are implemented as Python functions and called directly
-by the orchestrator during receipt processing.
+These are utility tools that complement the agent-based tools created via .as_tool()
+in orchestrator.py. They provide validation and MCP persistence functionality.
+
+Tools:
+- validate_expense: Validates categorized expense data using Gemini + business rules
+- write_range: Write data to Google Sheets via MCP
+- get_ranges: Read data from Google Sheets via MCP
 """
 
 import json
+import re
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
 
+from agents import function_tool
 from loguru import logger
-from openai import AsyncOpenAI
 
-from src.agents.prompts import CATEGORIZER_SYSTEM_PROMPT, MERCHANT_HINTS
-from src.models.schemas import (
-    CategorizedExpense,
-    CategorizationToolResponse,
-    ExpenseCategory,
-    ValidationResult,
-    ValidationToolResponse,
-)
+from src.agents.prompts import get_validator_prompt
+from src.core.configs import settings
+from src.core.llm_manager import llm_manager
+from src.services.mcp_client import mcp_client
 
 
-async def categorize_receipt(
-    client: AsyncOpenAI,
-    model: str,
-    text: str,
-    feedback: str | None = None,
-) -> CategorizationToolResponse:
-    """Extract and categorize expense data from receipt email text.
+# --- Validation Tool (uses Gemini with business rules) ---
+@function_tool
+async def validate_expense(
+    fecha: str,
+    tipo: str,
+    categoria: str,
+    importe: str,
+    descripcion: str,
+) -> str:
+    """Validate categorized expense data using business rules and an AI validator.
 
-    Uses an LLM to parse raw email content (potentially with HTML noise)
-    and extract structured expense information.
+    This tool uses Gemini to verify if the categorization is correct based on
+    business rules. If the categorization is wrong, it provides corrections.
 
     Args:
-        client: OpenAI-compatible async client
-        model: Model name to use
-        text: Raw email body text
-        feedback: Optional feedback from previous validation failure
+        fecha: Transaction date in DD/MM/YYYY format
+        tipo: Movement type ("Gasto" or "Ingreso")
+        categoria: Expense category (Alimentación, Transporte, Ocio, etc.)
+        importe: Amount with Spanish comma decimal (e.g., "362,67")
+        descripcion: Brief description of the expense/merchant
 
     Returns:
-        CategorizationToolResponse with expense data or error
+        JSON with:
+        - is_valid (bool): Whether categorization is correct
+        - feedback (str|null): Explanation if invalid
+        - corrected_category (str|null): Correct category if wrong
+        - corrected_type (str|null): Correct type if wrong
     """
-    logger.info("Categorizing receipt text")
+    logger.info(f"validate_expense called for: {descripcion} - {categoria}")
 
-    # Build enhanced system prompt with merchant hints
-    merchant_hints_str = json.dumps(MERCHANT_HINTS, indent=2, ensure_ascii=False)
-    enhanced_system_prompt = (
-        f"{CATEGORIZER_SYSTEM_PROMPT}\n\n"
-        f"## Pistas de Comercios Conocidos\n"
-        f"Usa estas pistas para identificar mejor formatos de fecha y categorías típicas:\n"
-        f"```json\n{merchant_hints_str}\n```"
-    )
+    # Build the expense data to send to validator
+    expense_data = {
+        "fecha": fecha,
+        "tipo": tipo,
+        "categoria": categoria,
+        "importe": importe,
+        "descripcion": descripcion,
+    }
 
-    # Build the user message
-    user_content = f"Analiza el siguiente email de recibo y extrae los datos del gasto:\n\n{text}"
+    # First, do basic format validation
+    format_errors = _validate_format(fecha, tipo, categoria, importe)
+    if format_errors:
+        return json.dumps({
+            "is_valid": False,
+            "feedback": "; ".join(format_errors),
+            "corrected_category": None,
+            "corrected_type": None,
+        })
 
-    if feedback:
-        user_content += f"\n\n---\nFEEDBACK DE CORRECCIÓN:\n{feedback}\n\nPor favor, corrige los datos basándote en este feedback."
-        logger.debug(f"Including feedback for correction: {feedback[:100]}...")
-
+    # Use Gemini for semantic validation with business rules
     try:
-        response = await client.chat.completions.create(
+        validator_prompt = get_validator_prompt()
+        provider = settings.orchestrator.validator_provider
+
+        # Get model from llm_manager
+        model = llm_manager.get_model(provider)
+        if not model:
+            logger.warning(f"Validator model not available ({provider}), skipping AI validation")
+            return json.dumps({
+                "is_valid": True,
+                "feedback": None,
+                "corrected_category": None,
+                "corrected_type": None,
+            })
+
+        # Call the validator model directly
+        from agents import Agent, Runner, ModelSettings
+
+        validator_agent = Agent(
+            name="ValidadorGastos",
+            instructions=validator_prompt,
             model=model,
-            messages=[
-                {"role": "system", "content": enhanced_system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.1,  # Low temperature for consistent extraction
-            max_tokens=500,
+            model_settings=ModelSettings(temperature=0.0),
         )
 
-        content = response.choices[0].message.content
-        if not content:
-            return CategorizationToolResponse(
-                success=False,
-                error="Empty response from categorization model",
-            )
+        # Send expense data to validator
+        message = json.dumps(expense_data, ensure_ascii=False)
+        result = await Runner.run(validator_agent, message)
 
-        # Parse JSON response
-        # Handle potential markdown code blocks
-        content = content.strip()
-        if content.startswith("```"):
-            # Remove markdown code block
-            lines = content.split("\n")
-            content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-            content = content.strip()
+        # Parse the validator's response
+        response_text = result.final_output
+        logger.debug(f"Validator response: {response_text}")
 
-        data = json.loads(content)
+        # Try to extract JSON from response
+        validation_result = _parse_validator_response(response_text)
 
-        # Check for error response from LLM
-        if "error" in data:
-            return CategorizationToolResponse(
-                success=False,
-                error=data["error"],
-            )
-
-        # Parse and validate the extracted data
-        try:
-            # Parse date
-            fecha_str = data.get("fecha", "")
-            if isinstance(fecha_str, str):
-                fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-            else:
-                fecha = fecha_str
-
-            # Parse amount
-            importe = Decimal(str(data["importe"]))
-
-            # Validate category
-            categoria_str = data.get("categoria", "otros").lower()
-            try:
-                categoria = ExpenseCategory(categoria_str)
-            except ValueError:
-                categoria = ExpenseCategory.OTROS
-                logger.warning(f"Unknown category '{categoria_str}', defaulting to 'otros'")
-
-            expense = CategorizedExpense(
-                comercio=data["comercio"],
-                importe=importe,
-                moneda=data.get("moneda", "EUR"),
-                fecha=fecha,
-                categoria=categoria,
-                descripcion=data.get("descripcion"),
-            )
-
-            logger.info(f"Successfully categorized: {expense.comercio} - {expense.importe} {expense.moneda}")
-            return CategorizationToolResponse(success=True, expense=expense)
-
-        except (KeyError, ValueError, InvalidOperation) as e:
-            error_msg = f"Error parsing categorization response: {e}"
-            logger.error(error_msg)
-            return CategorizationToolResponse(success=False, error=error_msg)
-
-    except json.JSONDecodeError as e:
-        error_msg = f"Invalid JSON in categorization response: {e}"
-        logger.error(error_msg)
-        return CategorizationToolResponse(success=False, error=error_msg)
+        logger.info(f"Validation result: is_valid={validation_result.get('is_valid')}")
+        return json.dumps(validation_result)
 
     except Exception as e:
-        error_msg = f"Categorization failed: {e}"
-        logger.exception(error_msg)
-        return CategorizationToolResponse(success=False, error=error_msg)
+        logger.exception(f"Error in AI validation: {e}")
+        # Fall back to accepting the expense if validator fails
+        return json.dumps({
+            "is_valid": True,
+            "feedback": f"Validación AI no disponible: {e}",
+            "corrected_category": None,
+            "corrected_type": None,
+        })
 
 
-def validate_expense(expense: CategorizedExpense) -> ValidationToolResponse:
-    """Validate categorized expense data against business rules.
+def _validate_format(fecha: str, tipo: str, categoria: str, importe: str) -> list[str]:
+    """Validate basic format requirements.
 
-    Performs validation checks including:
-    - Amount reasonableness
-    - Date validity (not future, not too old)
-    - Required fields presence
-    - Category consistency
-
-    Args:
-        expense: The categorized expense to validate
-
-    Returns:
-        ValidationToolResponse with validation result
+    Returns list of error messages, empty if all valid.
     """
-    logger.info(f"Validating expense: {expense.comercio}")
+    errors = []
 
-    warnings: list[str] = []
-    errors: list[str] = []
+    # Valid categories
+    valid_categories = [
+        "Alimentación", "Transporte", "Ocio", "Hogar", "Ropa",
+        "Inversiones", "Suscripciones", "Otros", "Ahorros"
+    ]
 
-    # --- Amount Validation ---
-    if expense.importe <= 0:
-        errors.append("El importe debe ser mayor que cero")
-    elif expense.importe > Decimal("10000"):
-        warnings.append(f"Importe muy alto ({expense.importe}), verificar manualmente")
-    elif expense.importe < Decimal("0.01"):
-        errors.append("El importe es demasiado pequeño")
+    # Valid types
+    valid_types = ["Gasto", "Ingreso"]
 
-    # --- Date Validation ---
-    today = date.today()
-
-    if expense.fecha > today:
-        errors.append(f"La fecha ({expense.fecha}) no puede ser futura")
-
-    # Check if date is too old (more than 1 year)
-    one_year_ago = today - timedelta(days=365)
-    if expense.fecha < one_year_ago:
-        warnings.append(f"La fecha ({expense.fecha}) es de hace más de un año")
-
-    # Check if date is very recent but in the future by a day (timezone issues)
-    if expense.fecha == today + timedelta(days=1):
-        warnings.append("La fecha es mañana, posible problema de zona horaria")
-
-    # --- Merchant Validation ---
-    if not expense.comercio or len(expense.comercio.strip()) < 2:
-        errors.append("El nombre del comercio es demasiado corto o está vacío")
-
-    if len(expense.comercio) > 100:
-        warnings.append("El nombre del comercio es muy largo, podría contener ruido")
-
-    # Check for suspicious patterns (HTML remnants)
-    suspicious_patterns = ["<", ">", "href=", "class=", "style="]
-    for pattern in suspicious_patterns:
-        if pattern in expense.comercio:
-            errors.append(f"El nombre del comercio contiene HTML ({pattern})")
-            break
-
-    # --- Currency Validation ---
-    valid_currencies = ["EUR", "USD", "GBP", "CHF", "MXN", "ARS", "COP"]
-    if expense.moneda not in valid_currencies:
-        warnings.append(f"Moneda no común: {expense.moneda}")
-
-    # --- Category-Amount Consistency ---
-    # Some basic heuristics
-    if expense.categoria == ExpenseCategory.SUSCRIPCIONES and expense.importe > Decimal("100"):
-        warnings.append("Importe alto para una suscripción, verificar categoría")
-
-    if expense.categoria == ExpenseCategory.TRANSPORTE and expense.importe > Decimal("500"):
-        warnings.append("Importe muy alto para transporte regular, verificar categoría")
-
-    # --- Build Result ---
-    is_valid = len(errors) == 0
-
-    if errors:
-        error_message = "; ".join(errors)
-        logger.warning(f"Validation failed: {error_message}")
-    else:
-        error_message = None
-        if warnings:
-            logger.info(f"Validation passed with warnings: {warnings}")
-        else:
-            logger.info("Validation passed")
-
-    return ValidationToolResponse(
-        result=ValidationResult(
-            is_valid=is_valid,
-            error_message=error_message,
-            warnings=warnings,
-        )
-    )
-
-
-def validate_expense_from_dict(data: dict) -> ValidationToolResponse:
-    """Validate expense from dictionary data (for tool calling).
-
-    Args:
-        data: Dictionary with expense fields
-
-    Returns:
-        ValidationToolResponse with validation result
-    """
+    # Check date format (DD/MM/YYYY)
     try:
-        # Parse date if string
-        fecha = data.get("fecha")
-        if isinstance(fecha, str):
-            fecha = datetime.strptime(fecha, "%Y-%m-%d").date()
+        parsed_date = datetime.strptime(fecha, "%d/%m/%Y").date()
+        today = date.today()
+        if parsed_date > today:
+            errors.append(f"La fecha ({fecha}) no puede ser futura")
+        one_year_ago = today - timedelta(days=365)
+        if parsed_date < one_year_ago:
+            errors.append(f"La fecha ({fecha}) es de hace más de un año")
+    except ValueError:
+        errors.append(f"Formato de fecha inválido: {fecha}. Debe ser DD/MM/YYYY")
 
-        # Parse amount
-        importe = Decimal(str(data["importe"]))
+    # Check type
+    if tipo not in valid_types:
+        errors.append(f"Tipo inválido: {tipo}. Debe ser 'Gasto' o 'Ingreso'")
 
-        # Parse category
-        categoria_str = data.get("categoria", "otros").lower()
-        try:
-            categoria = ExpenseCategory(categoria_str)
-        except ValueError:
-            categoria = ExpenseCategory.OTROS
+    # Check category
+    if categoria not in valid_categories:
+        errors.append(f"Categoría inválida: {categoria}. Categorías válidas: {', '.join(valid_categories)}")
 
-        expense = CategorizedExpense(
-            comercio=data["comercio"],
-            importe=importe,
-            moneda=data.get("moneda", "EUR"),
-            fecha=fecha,
-            categoria=categoria,
-            descripcion=data.get("descripcion"),
+    # Check importe format (Spanish comma decimal)
+    importe_pattern = r"^\d+,\d{2}$"
+    if not re.match(importe_pattern, importe):
+        # Also allow whole numbers like "32,00"
+        if not re.match(r"^\d+,\d{1,2}$", importe):
+            errors.append(f"Formato de importe inválido: {importe}. Debe usar coma decimal (ej: 362,67)")
+
+    return errors
+
+
+def _parse_validator_response(response_text: str) -> dict:
+    """Parse the validator's response, extracting JSON.
+
+    Args:
+        response_text: Raw response from validator agent
+
+    Returns:
+        Parsed validation result dict
+    """
+    # Default response
+    default = {
+        "is_valid": True,
+        "feedback": None,
+        "corrected_category": None,
+        "corrected_type": None,
+    }
+
+    if not response_text:
+        return default
+
+    # Try to parse as direct JSON
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try to extract JSON from markdown code blocks
+    json_patterns = [
+        r"```json\s*(.*?)\s*```",
+        r"```\s*(.*?)\s*```",
+        r"\{[^{}]*\}",
+    ]
+
+    for pattern in json_patterns:
+        matches = re.findall(pattern, response_text, re.DOTALL)
+        for match in matches:
+            try:
+                result = json.loads(match)
+                if "is_valid" in result:
+                    return result
+            except json.JSONDecodeError:
+                continue
+
+    # Could not parse, assume valid
+    logger.warning(f"Could not parse validator response: {response_text[:200]}")
+    return default
+
+
+# --- MCP Tools for Google Sheets ---
+@function_tool
+async def write_range(
+    range: str,
+    values: list[list[str]],
+) -> str:
+    """Write data to Google Sheets via MCP server.
+
+    Use this tool to persist expense data to the Google Sheets document.
+    Before writing, you should use get_ranges to find the next empty row.
+
+    Args:
+        range: Sheet range in A1 notation (e.g., "Gastos!A55:E55")
+        values: 2D array of values to write (e.g., [["05/11/2025", "Gasto", "Otros", "362,67", "IRPF 2024"]])
+
+    Returns:
+        JSON with success status and details
+    """
+    logger.info(f"write_range called: {range}")
+    logger.debug(f"Values: {values}")
+
+    if not mcp_client.is_connected:
+        logger.warning("MCP server not connected, attempting to establish connection")
+
+    try:
+        result = await mcp_client.call_tool(
+            "write_range",
+            {
+                "range": range,
+                "values": values,
+            }
         )
 
-        return validate_expense(expense)
+        if result.get("success"):
+            logger.info(f"Successfully wrote to {range}")
+            return json.dumps({
+                "success": True,
+                "range": range,
+                "rows_written": len(values),
+                "message": f"Datos guardados en {range}",
+            })
+        else:
+            error = result.get("error", "Error desconocido del servidor MCP")
+            logger.error(f"MCP write_range failed: {error}")
+            return json.dumps({
+                "success": False,
+                "error": error,
+            })
 
     except Exception as e:
-        logger.error(f"Error parsing expense data for validation: {e}")
-        return ValidationToolResponse(
-            result=ValidationResult(
-                is_valid=False,
-                error_message=f"Error parsing expense data: {e}",
-            )
+        logger.exception(f"Error calling MCP write_range: {e}")
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+        })
+
+
+@function_tool
+async def get_ranges(
+    ranges: list[str],
+) -> str:
+    """Read data from Google Sheets via MCP server.
+
+    Use this tool to read existing data, particularly to find the last row
+    with data before writing a new expense.
+
+    Args:
+        ranges: List of ranges to read in A1 notation (e.g., ["Gastos!A1:E100"])
+
+    Returns:
+        JSON with the data from the requested ranges
+    """
+    logger.info(f"get_ranges called: {ranges}")
+
+    if not mcp_client.is_connected:
+        logger.warning("MCP server not connected, attempting to establish connection")
+
+    try:
+        result = await mcp_client.call_tool(
+            "get_ranges",
+            {
+                "ranges": ranges,
+            }
         )
+
+        if result.get("success"):
+            logger.info(f"Successfully read {len(ranges)} range(s)")
+            return json.dumps({
+                "success": True,
+                "data": result.get("data") or result.get("values") or result,
+            })
+        else:
+            error = result.get("error", "Error desconocido del servidor MCP")
+            logger.error(f"MCP get_ranges failed: {error}")
+            return json.dumps({
+                "success": False,
+                "error": error,
+            })
+
+    except Exception as e:
+        logger.exception(f"Error calling MCP get_ranges: {e}")
+        return json.dumps({
+            "success": False,
+            "error": str(e),
+        })

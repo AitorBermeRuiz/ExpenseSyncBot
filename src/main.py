@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("MCP server connection established")
     else:
         logger.warning(
-            "MCP server not available. External tools (AddExpense) will fail. "
+            "MCP server not available. External tools (get_ranges, write_range) will fail. "
             "Ensure the C# MCP server is running."
         )
 
@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # Create FastAPI app
 app = FastAPI(
     title="ExpenseSyncBot API",
-    description="Agent-based expense automation service with MCP integration",
-    version="1.0.0",
+    description="Agent-based expense automation service using OpenAI Agents SDK with MCP integration",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
@@ -104,6 +104,7 @@ async def detailed_health_check() -> dict:
         "config": {
             "orchestrator_provider": settings.orchestrator.llm_provider,
             "categorizer_provider": settings.orchestrator.categorizer_provider,
+            "validator_provider": settings.orchestrator.validator_provider,
             "max_correction_attempts": settings.orchestrator.max_correction_attempts,
         },
     }
@@ -160,9 +161,21 @@ async def process_receipt(
 # --- Utility Endpoints ---
 @app.get("/tools", tags=["Tools"])
 async def list_available_tools() -> dict:
-    """List all available tools (internal + MCP)."""
-    internal_tools = ["categorize_receipt", "validate_expense"]
+    """List all available tools (agent-tools + function-tools + MCP)."""
+    # Agent-based tools (agents converted via .as_tool())
+    agent_tools = [
+        "categorize_expense",      # CategorizadorGastos.as_tool()
+        "validate_categorization", # ValidadorGastos.as_tool()
+        "save_expense",            # PersistenciaGastos.as_tool()
+    ]
 
+    # Function tools (@function_tool decorator) used by persistence agent
+    function_tools = [
+        "get_ranges",   # MCP: Read from Google Sheets
+        "write_range",  # MCP: Write to Google Sheets
+    ]
+
+    # MCP tools (from external C# server)
     mcp_tools = []
     try:
         mcp_tool_schemas = await mcp_client.get_available_tools()
@@ -171,9 +184,11 @@ async def list_available_tools() -> dict:
         logger.warning(f"Could not fetch MCP tools: {e}")
 
     return {
-        "internal_tools": internal_tools,
+        "agent_tools": agent_tools,
+        "function_tools": function_tools,
         "mcp_tools": mcp_tools,
-        "total": len(internal_tools) + len(mcp_tools),
+        "total": len(agent_tools) + len(function_tools) + len(mcp_tools),
+        "architecture": "OpenAI Agents SDK with .as_tool() pattern",
     }
 
 
