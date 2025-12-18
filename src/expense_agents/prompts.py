@@ -175,8 +175,8 @@ Si recibes:
 - Escribe en: "Gastos!A4:E4"
 
 **Análisis INCORRECTO (NO hacer):**
-- ❌ "La fila 2 tiene celdas vacías, escribo ahí" → NUNCA hagas esto
-- ❌ "Solo cuento filas completas" → NUNCA hagas esto
+- "La fila 2 tiene celdas vacías, escribo ahí" → NUNCA hagas esto
+- "Solo cuento filas completas" → NUNCA hagas esto
 
 **Regla de oro:** Si una fila aparece en Values[], cuenta como fila ocupada, sin importar cuántas celdas vacías tenga.
 
