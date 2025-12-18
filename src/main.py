@@ -30,6 +30,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Handles startup and shutdown events:
     - Startup: Initialize logging, connect to MCP server
     - Shutdown: Cleanup connections
+
+    Note: API keys are exported to os.environ automatically when
+    settings module is loaded (see src.core.configs).
     """
     # --- Startup ---
     setup_logging(settings.log_level)

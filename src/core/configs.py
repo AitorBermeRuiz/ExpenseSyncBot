@@ -9,8 +9,13 @@ This module provides:
 
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Load .env into os.environ BEFORE Settings initialization
+# This ensures third-party SDKs (like OpenAI Agents) can access env vars
+load_dotenv()
 
 
 # --- LLM Configuration ---
@@ -36,7 +41,7 @@ AVAILABLE_LLMS: dict[str, LLMConfig] = {
         api_key_env_var="OPENAI_API_KEY",
     ),
     "gemini": LLMConfig(
-        model_name="gemini-2.5-flash",
+        model_name="gemini-3-flash-preview",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         api_key_env_var="GOOGLE_API_KEY",
     ),

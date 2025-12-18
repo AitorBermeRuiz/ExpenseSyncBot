@@ -80,3 +80,11 @@
 - Fecha: DD/MM/YYYY
 - Importe: con coma decimal española (ej: "362,67")
 - Columnas: Fecha, Tipo, Categoría, Importe, Descripción
+- Descripción: Formato: "Nombre comercio - tipo servicio/producto" (max 50 chars). 
+  Ejemplo: "Mercadona - supermercado", "Apple - iCloud almacenamiento".
+
+### Regla para Siguiente Fila (Google Sheets)
+1. Leer filas existentes con `get_ranges`.
+2. Contar TODAS las filas recibidas en la lista (Values), incluyendo las que tienen celdas vacías.
+3. La siguiente fila libre es: `total_filas + 1`.
+4. NUNCA sobrescribir celdas internas si la fila ya existe en el array.
