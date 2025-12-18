@@ -121,8 +121,9 @@ class CategorizedExpense(BaseModel):
     descripcion: str = Field(
         ...,
         description=(
-            "Descripción breve: nombre del comercio o concepto del movimiento. "
-            "Ejemplos: 'MERCADONA', 'Bizum Paula', 'Apple iCloud', 'Nómina Empresa'."
+            "Formato: 'Nombre comercio - tipo servicio/producto' (max 50 chars). "
+            "SIEMPRE especifica qué es: 'Mercadona - supermercado' "
+            " 'Apple - iCloud almacenamiento'."
         ),
     )
 

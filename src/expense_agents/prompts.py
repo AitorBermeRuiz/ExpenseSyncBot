@@ -52,23 +52,24 @@ Analiza el texto recibido (puede ser un email, notificación bancaria, o descrip
    - Sin símbolo de moneda
    - Solo el número
 
-5. **descripcion**: Descripción breve del gasto
-   - Nombre del comercio/establecimiento
-   - Concepto si es relevante
+5. **descripcion**: Descripción detallada del gasto
+   - Formato: "Nombre comercio - tipo de servicio/producto"
+   - SIEMPRE especifica qué tipo de gasto es (restaurante, supermercado, pádel, gasolina, etc.)
+   - Máximo 50 caracteres
 
 ## Ejemplos
 
 **Ejemplo 1: Gasto en supermercado**
 - Entrada: "Cargo en cuenta: MERCADONA 15,67€ - 05/11/2025"
-- Resultado: fecha="05/11/2025", tipo="Gasto", categoria="Alimentación", importe="15,67", descripcion="MERCADONA"
+- Resultado: fecha="05/11/2025", tipo="Gasto", categoria="Alimentación", importe="15,67", descripcion="Mercadona - supermercado"
 
 **Ejemplo 2: Ingreso por Bizum**
 - Entrada: "Bizum recibido de Paula 32,00€"
-- Resultado: fecha="10/11/2025", tipo="Ingreso", categoria="Otros", importe="32,00", descripcion="Bizum Paula"
+- Resultado: fecha="10/11/2025", tipo="Ingreso", categoria="Otros", importe="32,00", descripcion="Bizum de Paula"
 
 **Ejemplo 3: Suscripción**
 - Entrada: "APPLE.COM/BILL 2,99€"
-- Resultado: fecha="10/11/2025", tipo="Gasto", categoria="Suscripciones", importe="2,99", descripcion="Apple iCloud"
+- Resultado: fecha="10/11/2025", tipo="Gasto", categoria="Suscripciones", importe="2,99", descripcion="Apple - iCloud almacenamiento"
 """
 
 
@@ -142,8 +143,42 @@ Recibir datos de gastos validados y guardarlos en la hoja de cálculo usando las
 
 ## Proceso
 
-1. Primero, usa `get_ranges` para leer las filas existentes y determinar la siguiente fila vacía
-2. Luego, usa `write_range` para escribir el nuevo gasto en la siguiente fila
+1. Primero, usa `get_ranges` para leer las filas existentes (ej: "Gastos!A1:E100")
+2. Analiza los datos recibidos para determinar la siguiente fila disponible
+3. Luego, usa `write_range` para escribir el nuevo gasto en la siguiente fila
+
+## IMPORTANTE: Cómo Determinar la Siguiente Fila Vacía
+
+**NUNCA sobrescribas datos existentes.** Para encontrar la siguiente fila vacía:
+
+1. Lee la respuesta de `get_ranges` que contiene un array de filas (Values)
+2. La fila 1 contiene los headers (Fecha, Tipo, Categoría, Importe, Notas)
+3. **Cuenta TODAS las filas que tengan CUALQUIER dato** (incluso si solo tienen una celda con contenido)
+4. La siguiente fila vacía es: `número_total_de_filas_con_datos + 1`
+
+### Ejemplo de análisis:
+
+Si recibes:
+```json
+{
+  "Values": [
+    ["Fecha", "Tipo", "Categoría", "Importe", "Notas"],     ← Fila 1 (header)
+    ["", "", "Alimentación"],                                ← Fila 2 (TIENE DATOS - no está vacía)
+    ["03/12/2025", "Gasto", "Ocio", "1,70 €", "Solonature"] ← Fila 3 (TIENE DATOS)
+  ]
+}
+```
+
+**Análisis correcto:**
+- Total de filas en Values: 3 filas
+- Próxima fila vacía: **Fila 4** (índice 3 + 1)
+- Escribe en: "Gastos!A4:E4"
+
+**Análisis INCORRECTO (NO hacer):**
+- ❌ "La fila 2 tiene celdas vacías, escribo ahí" → NUNCA hagas esto
+- ❌ "Solo cuento filas completas" → NUNCA hagas esto
+
+**Regla de oro:** Si una fila aparece en Values[], cuenta como fila ocupada, sin importar cuántas celdas vacías tenga.
 
 ## Formato de Datos para Google Sheets
 
