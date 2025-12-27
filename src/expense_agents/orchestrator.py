@@ -32,7 +32,7 @@ from src.expense_agents.prompts import (
     PERSISTENCE_SYSTEM_PROMPT,
     get_validator_prompt,
 )
-from src.expense_agents.tools import get_ranges, write_range
+from src.expense_agents.tools import get_next_row, get_ranges, write_range
 from src.core.configs import settings
 from src.core.llm_manager import llm_manager
 from src.models.schemas import (
@@ -125,7 +125,7 @@ def create_persistence_agent() -> Agent:
         instructions=PERSISTENCE_SYSTEM_PROMPT,
         model=model,
         model_settings=ModelSettings(temperature=0.0),
-        tools=[get_ranges, write_range],
+        tools=[get_next_row, get_ranges, write_range],
     )
 
 

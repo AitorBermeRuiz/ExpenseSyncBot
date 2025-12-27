@@ -36,6 +36,7 @@ from src.expense_agents.prompts import (
     load_business_rules,
 )
 from src.expense_agents.tools import (
+    get_next_row,
     get_ranges,
     write_range,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "get_validator_prompt",
     "load_business_rules",
     # MCP Tools
+    "get_next_row",
     "get_ranges",
     "write_range",
 ]
