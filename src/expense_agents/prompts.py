@@ -7,7 +7,6 @@ This module contains all the prompt templates used by the agents:
 - Orchestrator: Coordinates all agents
 """
 
-import os
 from pathlib import Path
 
 

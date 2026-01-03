@@ -5,7 +5,7 @@ a long-lived SSE connection to the MCP server with automatic reconnection.
 """
 
 import asyncio
-import contextlib
+from contextlib import AsyncExitStack
 from typing import Any
 
 from loguru import logger
@@ -28,8 +28,7 @@ class MCPClientManager:
         self._tools: dict[str, Tool] = {}
         self._connected: bool = False
         self._connection_lock = asyncio.Lock()
-        self._connection_context: Any = None
-        self._streams_context: Any = None
+        self._exit_stack: AsyncExitStack | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -56,21 +55,26 @@ class MCPClientManager:
         """
         async with self._connection_lock:
             # Close existing connection if any
-            if self._session or self._connection_context:
+            if self._session or self._exit_stack:
                 await self._disconnect_internal()
 
             try:
                 server_url = settings.mcp.server_url
                 logger.info(f"Establishing persistent connection to MCP server at {server_url}")
 
-                # Create the SSE client context and keep it alive
-                # We use __aenter__ to manually manage the context manager lifecycle
-                self._streams_context = sse_client(server_url)
-                read_stream, write_stream = await self._streams_context.__aenter__()
+                # Use AsyncExitStack for proper context manager lifecycle
+                self._exit_stack = AsyncExitStack()
+                await self._exit_stack.__aenter__()
 
-                # Create session context
-                self._connection_context = ClientSession(read_stream, write_stream)
-                self._session = await self._connection_context.__aenter__()
+                # Enter SSE client context
+                read_stream, write_stream = await self._exit_stack.enter_async_context(
+                    sse_client(server_url)
+                )
+
+                # Enter session context
+                self._session = await self._exit_stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
+                )
 
                 # Initialize the session
                 await asyncio.wait_for(
@@ -91,7 +95,7 @@ class MCPClientManager:
                 logger.success("MCP client manager started successfully with persistent connection")
                 return True
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("MCP server connection timed out")
                 await self._disconnect_internal()
                 return False
@@ -104,21 +108,16 @@ class MCPClientManager:
     async def _disconnect_internal(self) -> None:
         """Internal method to close the connection without acquiring lock."""
         try:
-            # Close session context
-            if self._connection_context and self._session:
-                await self._connection_context.__aexit__(None, None, None)
-
-            # Close streams context
-            if self._streams_context:
-                await self._streams_context.__aexit__(None, None, None)
+            # Close all contexts via AsyncExitStack
+            if self._exit_stack:
+                await self._exit_stack.aclose()
 
         except Exception as e:
             logger.debug(f"Error during disconnect: {e}")
 
         finally:
             self._session = None
-            self._connection_context = None
-            self._streams_context = None
+            self._exit_stack = None
             self._tools = {}
             self._connected = False
 

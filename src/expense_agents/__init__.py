@@ -20,12 +20,10 @@ Pattern:
 """
 
 from src.expense_agents.orchestrator import (
-    OrchestratorAgent,
     create_categorizer_agent,
     create_expense_orchestrator,
     create_persistence_agent,
     create_validator_agent,
-    get_orchestrator,
     process_receipt_with_agents,
 )
 from src.expense_agents.prompts import (
@@ -43,12 +41,10 @@ from src.expense_agents.tools import (
 
 __all__ = [
     # Orchestrator
-    "OrchestratorAgent",
     "create_categorizer_agent",
     "create_validator_agent",
     "create_persistence_agent",
     "create_expense_orchestrator",
-    "get_orchestrator",
     "process_receipt_with_agents",
     # Prompts
     "CATEGORIZER_SYSTEM_PROMPT",
