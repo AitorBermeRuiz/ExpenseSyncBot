@@ -18,9 +18,13 @@ Pattern:
     result = await Runner.run(orchestrator, message)
 """
 
-from agents import Agent, Runner, ModelSettings, WebSearchTool, trace
+from functools import lru_cache
+
+from agents import Agent, ModelSettings, Runner, trace
 from loguru import logger
 
+from src.core.configs import settings
+from src.core.llm_manager import llm_manager
 from src.expense_agents.constants import (
     TOOL_CATEGORIZE_EXPENSE,
     TOOL_SAVE_EXPENSE,
@@ -33,8 +37,6 @@ from src.expense_agents.prompts import (
     get_validator_prompt,
 )
 from src.expense_agents.tools import get_next_row, get_ranges, write_range
-from src.core.configs import settings
-from src.core.llm_manager import llm_manager
 from src.models.schemas import (
     CategorizedExpense,
     OrchestratorResult,
@@ -130,8 +132,9 @@ def create_persistence_agent() -> Agent:
 
 
 # --- Main Orchestrator Setup ---
+@lru_cache(maxsize=1)
 def create_expense_orchestrator() -> Agent:
-    """Create the main expense orchestrator agent.
+    """Create the main expense orchestrator agent (cached singleton).
 
     This agent:
     1. Has access to the categorizer agent as a tool (.as_tool())
@@ -139,6 +142,8 @@ def create_expense_orchestrator() -> Agent:
     3. Has access to the persistence agent as a tool (.as_tool())
     4. Has access to WebSearchTool for unknown merchants
     5. Coordinates the full workflow: categorize → validate → (retry) → persist
+
+    Note: Cached via @lru_cache - agents are stateless and reusable.
 
     Returns:
         Configured orchestrator Agent with all tools
@@ -274,17 +279,10 @@ async def process_receipt_with_agents(
             else:
                 message = "Gasto procesado exitosamente"
 
-            # Prepare expense data for response
-            expense_dict = (
-                orchestrator_result.expense_data.model_dump()
-                if orchestrator_result.expense_data
-                else None
-            )
-
             return ProcessReceiptResponse(
                 status=ProcessingStatus.SUCCESS,
                 message=message,
-                data=expense_dict,
+                data=orchestrator_result.expense_data,
                 attempts=1,
                 errors=[],
             )
@@ -305,38 +303,9 @@ async def process_receipt_with_agents(
         logger.exception(f"Error in orchestrator: {e}")
         return ProcessReceiptResponse(
             status=ProcessingStatus.ERROR,
-            message=f"Error interno: {e}",
+            message="Error interno del servidor. Por favor, inténtalo de nuevo.",
             attempts=1,
-            errors=[str(e)],
+            errors=["internal_server_error"],
         )
 
 
-# --- FastAPI Compatibility Layer ---
-class OrchestratorAgent:
-    """Wrapper class for compatibility with existing FastAPI dependency injection."""
-
-    def __init__(self) -> None:
-        logger.info(
-            f"OrchestratorAgent initialized - "
-            f"orchestrator: {settings.orchestrator.llm_provider}, "
-            f"categorizer: {settings.orchestrator.categorizer_provider}, "
-            f"validator: {settings.orchestrator.validator_provider}"
-        )
-
-    async def process_receipt(
-        self,
-        email_body: str,
-        email_subject: str | None = None,
-        sender: str | None = None,
-    ) -> ProcessReceiptResponse:
-        """Process a receipt email through the agent workflow."""
-        return await process_receipt_with_agents(
-            email_body=email_body,
-            email_subject=email_subject,
-            sender=sender,
-        )
-
-
-async def get_orchestrator() -> OrchestratorAgent:
-    """Factory function to create orchestrator instance."""
-    return OrchestratorAgent()

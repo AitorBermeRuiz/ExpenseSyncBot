@@ -3,9 +3,9 @@
 from src.models.schemas import (
     CategorizedExpense,
     ExpenseCategory,
+    ProcessingStatus,
     ProcessReceiptRequest,
     ProcessReceiptResponse,
-    ProcessingStatus,
     ValidationResult,
 )
 

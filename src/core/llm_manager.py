@@ -6,9 +6,6 @@ instances for different LLM providers using the agents SDK.
 
 import os
 
-from loguru import logger
-from openai import AsyncOpenAI
-
 from agents import OpenAIChatCompletionsModel
 from loguru import logger
 from openai import AsyncOpenAI

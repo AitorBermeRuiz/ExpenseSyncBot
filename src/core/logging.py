@@ -12,7 +12,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
-    LOG_FORMAT = (
+    log_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
         "<level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
@@ -31,7 +31,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     logger.add(
         sink=sys.stderr,
         level=log_level.upper(),
-        format=LOG_FORMAT,
+        format=log_format,
         colorize=True,
     )
 
@@ -39,7 +39,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     logger.add(
         sink=os.path.join(log_dir, "expense_sync_{time}.log"),
         level=log_level.upper(),
-        format=LOG_FORMAT,
+        format=log_format,
         rotation="10 MB",
         retention="7 days",
         compression="gz",

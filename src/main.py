@@ -4,22 +4,18 @@ This is the main entry point for the expense automation API.
 It exposes the /process-receipt endpoint consumed by n8n.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from src.expense_agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
-from src.expense_agents.orchestrator import OrchestratorAgent, get_orchestrator
 from src.core.configs import settings
 from src.core.logging import setup_logging
-from src.models.schemas import (
-    ProcessingStatus,
-    ProcessReceiptRequest,
-    ProcessReceiptResponse,
-)
+from src.expense_agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
+from src.expense_agents.orchestrator import process_receipt_with_agents
+from src.models.schemas import ProcessReceiptRequest, ProcessReceiptResponse
 from src.services.mcp_client import mcp_client
 
 
@@ -122,10 +118,7 @@ async def detailed_health_check() -> dict:
     summary="Process a receipt email",
     description="Extracts expense data from email content and optionally persists it via MCP",
 )
-async def process_receipt(
-    request: ProcessReceiptRequest,
-    orchestrator: OrchestratorAgent = Depends(get_orchestrator),
-) -> ProcessReceiptResponse:
+async def process_receipt(request: ProcessReceiptRequest) -> ProcessReceiptResponse:
     """Process a receipt email and extract expense data.
 
     This endpoint:
@@ -145,7 +138,7 @@ async def process_receipt(
     logger.debug(f"Email body length: {len(request.email_body)} chars")
 
     try:
-        result = await orchestrator.process_receipt(
+        result = await process_receipt_with_agents(
             email_body=request.email_body,
             email_subject=request.email_subject,
             sender=request.sender,
@@ -158,7 +151,7 @@ async def process_receipt(
         logger.exception(f"Error processing receipt: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing receipt: {str(e)}",
+            detail="Error processing receipt",
         )
 
 

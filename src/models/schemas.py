@@ -4,8 +4,9 @@ Note: With the OpenAI Agents SDK, tool schemas are auto-generated from
 @function_tool decorated functions. Manual schemas are no longer needed.
 """
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -39,44 +40,6 @@ class ProcessingStatus(str, Enum):
     CATEGORIZATION_FAILED = "categorization_failed"
     MCP_ERROR = "mcp_error"
     ERROR = "error"
-
-
-# --- Request/Response Models (FastAPI) ---
-class ProcessReceiptRequest(BaseModel):
-    """Request body for processing a receipt email."""
-
-    email_body: str = Field(
-        ...,
-        description="Raw email body content (may contain HTML)",
-        min_length=1,
-    )
-    email_subject: str | None = Field(
-        default=None,
-        description="Email subject line for additional context",
-    )
-    sender: str | None = Field(
-        default=None,
-        description="Sender email address",
-    )
-
-
-class ProcessReceiptResponse(BaseModel):
-    """Response from receipt processing endpoint."""
-
-    status: ProcessingStatus = Field(..., description="Processing result status")
-    message: str = Field(..., description="Human-readable status message")
-    data: dict[str, Any] | None = Field(
-        default=None,
-        description="Processed expense data if successful",
-    )
-    attempts: int = Field(
-        default=1,
-        description="Number of categorization attempts made",
-    )
-    errors: list[str] = Field(
-        default_factory=list,
-        description="List of errors encountered during processing",
-    )
 
 
 # --- Internal Data Models (Structured Outputs) ---
@@ -174,4 +137,42 @@ class OrchestratorResult(BaseModel):
             "The row where the expense was saved in Google Sheets (e.g., 'Gastos!A55:E55'). "
             "Null if not saved or if save failed."
         ),
+    )
+
+
+# --- Request/Response Models (FastAPI) ---
+class ProcessReceiptRequest(BaseModel):
+    """Request body for processing a receipt email."""
+
+    email_body: str = Field(
+        ...,
+        description="Raw email body content (may contain HTML)",
+        min_length=1,
+    )
+    email_subject: str | None = Field(
+        default=None,
+        description="Email subject line for additional context",
+    )
+    sender: str | None = Field(
+        default=None,
+        description="Sender email address",
+    )
+
+
+class ProcessReceiptResponse(BaseModel):
+    """Response from receipt processing endpoint."""
+
+    status: ProcessingStatus = Field(..., description="Processing result status")
+    message: str = Field(..., description="Human-readable status message")
+    data: CategorizedExpense | None = Field(
+        default=None,
+        description="Processed expense data if successful",
+    )
+    attempts: int = Field(
+        default=1,
+        description="Number of categorization attempts made",
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="List of errors encountered during processing",
     )

@@ -319,7 +319,7 @@ requires-dist = [
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
-    { name = "openai-agents", specifier = ">=0.0.3" },
+    { name = "openai-agents", specifier = "==0.0.3" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
@@ -739,20 +739,19 @@ wheels = [
 
 [[package]]
 name = "openai-agents"
-version = "0.6.2"
+version = "0.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "griffe" },
-    { name = "mcp" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "requests" },
     { name = "types-requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/6d/824b78c3161e0204f6fc71b459af64d8c65325a5486bc41b8eedcca7a715/openai_agents-0.6.2.tar.gz", hash = "sha256:1012aee224518292778fb4b07eb9148b0b5efa5cd87fd32ec656296aba885612", size = 2014662, upload-time = "2025-12-04T22:37:28.397Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/15/98/ef4aa3665e1b9ca4fe44ff1e2ed4f3d63b0a4ce1325061aa11f163959f99/openai_agents-0.0.3.tar.gz", hash = "sha256:f0958b94e775aa3b50c00309896fb1a009823c785bc9a6d0a0b853149f5b5ce6", size = 595967, upload-time = "2025-03-11T22:34:03.347Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/0a/43e24985d9df314d3dfa5f004443e8a15ef2bdcc79718dc74ded5545bf7d/openai_agents-0.6.2-py3-none-any.whl", hash = "sha256:3156637f3eee925268943f5c4b500b3b22b179158b82e7b53ed7ab362edf84d6", size = 238302, upload-time = "2025-12-04T22:37:26.313Z" },
+    { url = "https://files.pythonhosted.org/packages/10/8f/818e79728ef0f1e372483e6332f7deb9930245f4806aeb28470d2e773cd3/openai_agents-0.0.3-py3-none-any.whl", hash = "sha256:74ac0004e1f95d383863a41ab819cfb4bca9939c67ed74b26a1265a173bfdeb4", size = 75450, upload-time = "2025-03-11T22:34:01.629Z" },
 ]
 
 [[package]]

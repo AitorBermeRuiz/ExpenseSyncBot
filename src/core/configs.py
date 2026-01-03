@@ -134,10 +134,11 @@ class Settings(BaseSettings):
     # These fields allow Pydantic to load API keys from the environment (.env)
     # into the `settings` object so other modules can read them without
     # parsing the .env file directly.
-    openai_api_key: str | None = Field(default=None, env="OPENAI_API_KEY")
-    google_api_key: str | None = Field(default=None, env="GOOGLE_API_KEY")
-    deepseek_api_key: str | None = Field(default=None, env="DEEPSEEK_API_KEY")
-    groq_api_key: str | None = Field(default=None, env="GROQ_API_KEY")
+    # Field names automatically map to uppercase env vars (e.g., openai_api_key -> OPENAI_API_KEY)
+    openai_api_key: str | None = None
+    google_api_key: str | None = None
+    deepseek_api_key: str | None = None
+    groq_api_key: str | None = None
 
 
 # Global settings instance
