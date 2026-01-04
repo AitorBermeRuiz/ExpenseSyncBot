@@ -20,7 +20,7 @@ class MCPClientManager:
     """Manager for maintaining a persistent MCP client connection.
 
     This class manages a long-lived SSE connection to the MCP server,
-    with automatic reconnection if the connection drops.
+    with automatic reconnection if the connection drops.P
     """
 
     def __init__(self) -> None:
@@ -68,7 +68,7 @@ class MCPClientManager:
 
                 # Enter SSE client context
                 read_stream, write_stream = await self._exit_stack.enter_async_context(
-                    sse_client(server_url)
+                    sse_client(url=server_url, timeout=3600)
                 )
 
                 # Enter session context
