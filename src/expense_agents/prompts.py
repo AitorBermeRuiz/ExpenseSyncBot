@@ -193,8 +193,8 @@ ORCHESTRATOR_SYSTEM_PROMPT = """Eres el gestor principal de gastos. Tu trabajo e
    - Obtendrás: fecha, tipo, categoria, importe, descripcion
 
 2. **VALIDAR**: Usa `validate_categorization` con los datos categorizados
-   - Si is_valid es true: continúa al paso 4
-   - Si is_valid es false: aplica las correcciones (corrected_category, corrected_type) a los datos
+   - Si `is_valid` es true: continúa al paso 4
+   - Si `is_valid` es false: Vuelve a llamar a `categorize_expense` con el texto del email y la propiedad `feedback` que el validador te ha devuelto
 
 3. **BUSCAR** (opcional): Si no conoces el comercio, usa `web_search` para identificarlo
 
