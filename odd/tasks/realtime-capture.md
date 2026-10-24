@@ -26,7 +26,7 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 - [x] T2 S6 — Sheets API client: batchGet + append, service-account auth — worker — commit: 6eee64e
 - [x] T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — worker — commit: 252ffd9
 - [x] T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — worker — commit: d833cfe
-- [x] T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` (`docs/reglas_seed.csv`) — inline — commit: next
+- [x] T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` (`docs/reglas_seed.csv`) — inline — commit: 0d3cd1b
 - T6 S7 — CaixaBank email parser — blocked: waiting for a sample email
 - T7 S3 — Deploy: env vars, service-account key on server, shortcut/n8n wiring — blocked: needs user OK on server
 - T8 S8 — Telegram confirmation — deferred by user
