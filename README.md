@@ -69,7 +69,9 @@ curl -X POST http://your-server:8000/transactions \
 
 Sheet layout: **Gastos** `A:F` = Fecha, Tipo, Categoría, Importe, Descripción, Huella (fingerprint, can be hidden); **Reglas** `A:C` = Patrón, Categoría, Descripción (first matching pattern wins; LLM only when none matches). Seed the Reglas tab by importing `docs/reglas_seed.csv` (built from `business_rules.txt`); its `BIZUM DE` rule keeps Bizum senders away from the LLM.
 
-iOS 27 shortcut: automation trigger "Notification" from the Openbank app, action "Get Contents of URL" with POST JSON `source` = `openbank`, `raw_text` = Shortcut Input, `received_at` = Current Date, plus the `X-Api-Token` header.
+iOS 27 shortcut: automation trigger "Notification" from the Openbank app, action "Get Contents of URL" with POST JSON `source` = `openbank`, `raw_text` = Shortcut Input, `received_at` = Current Date.
+
+Routing: only n8n is public (Cloudflare tunnel); ports 8000/5000 are not reachable from the internet, and `/process-receipt` has no auth, so do not expose ExpenseSyncBot directly. The shortcut calls an n8n Webhook node (POST, Header Auth credential), which forwards the body with an HTTP Request node to `http://expensesyncbot:8000/transactions` adding the `X-Api-Token` header and returns its response.
 
 ## Project Structure
 

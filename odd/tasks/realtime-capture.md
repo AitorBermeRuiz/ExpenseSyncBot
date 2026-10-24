@@ -43,3 +43,4 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 - L8 Open: column F of Gastos must be confirmed empty before deploy (not checked).
 - L9 Finding: Bizum concept is chosen by the sender and rows are written USER_ENTERED, so text cells starting with = + - @ must be escaped (formula injection). Covered in T3.
 - L10 Delivery: work-unit commits T1-T5 on feature/realtime-capture (~1.2k authored lines). PR split is the user's call: suggested chain = PR1 T1+T2 (parser, Sheets client), PR2 T3+T4+T5 (service, endpoint, seed).
+- L11 Server check (read-only, 2026-10-24): cloudflared is token-managed; only n8n (n8nn.aitorbermeruiz.es) is public; ports 5000/5678/8000 unreachable from the internet. Decision for T7: shortcut → n8n Webhook (Header Auth) → http://expensesyncbot:8000/transactions; do not expose ExpenseSyncBot because /process-receipt has no auth.
