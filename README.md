@@ -44,6 +44,35 @@ Agent-based expense automation API built with **OpenAI Agents SDK** and MCP inte
 - **MCP integration**: Connects to external MCP servers via SSE for persistence
 - **Production-ready**: Modular architecture, logging, health checks
 
+## Real-time capture (`POST /transactions`)
+
+Bank push notifications are parsed without an LLM, deduplicated and appended to Google Sheets through the Sheets API (configure the `INGEST__*` variables in `.env`).
+
+```bash
+curl -X POST http://your-server:8000/transactions \
+  -H "X-Api-Token: $INGEST__API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source": "openbank",
+       "raw_text": "Openbank info: pago con tu tarjeta **7402 el 24/10 18:18 por 14,99 EUR en WWW.AMAZON +18002796620  LU.",
+       "received_at": "2026-10-24T18:20:00+02:00"}'
+```
+
+| Response | Meaning |
+|----------|---------|
+| 200 `saved` | Row appended; `data` and `sheet_range` are returned |
+| 200 `duplicate` | Fingerprint already in column F; nothing written |
+| 200 `ignored` | Text is not a card payment or received Bizum |
+| 401 | Missing or wrong `X-Api-Token` |
+| 422 | Invalid body (unknown `source`, empty or >2000-char `raw_text`, extra fields) |
+| 502 | Sheets write failed |
+| 503 | Ingestion not configured |
+
+Sheet layout: **Gastos** `A:F` = Fecha, Tipo, Categoría, Importe, Descripción, Huella (fingerprint, can be hidden); **Reglas** `A:C` = Patrón, Categoría, Descripción (first matching pattern wins; LLM only when none matches). Seed the Reglas tab by importing `docs/reglas_seed.csv` (built from `business_rules.txt`); its `BIZUM DE` rule keeps Bizum senders away from the LLM.
+
+iOS 27 shortcut: automation trigger "Notification" from the Openbank app, action "Get Contents of URL" with POST JSON `source` = `openbank`, `raw_text` = Shortcut Input, `received_at` = Current Date.
+
+Routing: only n8n is public (Cloudflare tunnel); ports 8000/5000 are not reachable from the internet, and `/process-receipt` has no auth, so do not expose ExpenseSyncBot directly. The shortcut calls an n8n Webhook node (POST, Header Auth credential), which forwards the body with an HTTP Request node to `http://expensesyncbot:8000/transactions` adding the `X-Api-Token` header and returns its response.
+
 ## Project Structure
 
 ```
