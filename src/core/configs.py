@@ -100,6 +100,20 @@ class OrchestratorSettings(BaseModel):
     )
 
 
+class IngestSettings(BaseModel):
+    """Real-time ingestion (POST /transactions) settings."""
+
+    api_token: str | None = Field(
+        default=None, description="Shared secret expected in the X-Api-Token header"
+    )
+    spreadsheet_id: str | None = Field(
+        default=None, description="Google Sheets spreadsheet ID"
+    )
+    google_credentials_file: str | None = Field(
+        default=None, description="Path to the service-account JSON key file"
+    )
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -129,6 +143,9 @@ class Settings(BaseSettings):
 
     # Orchestrator Settings
     orchestrator: OrchestratorSettings = Field(default_factory=OrchestratorSettings)
+
+    # Real-time ingestion Settings
+    ingest: IngestSettings = Field(default_factory=IngestSettings)
 
     # LLM API Keys
     # These fields allow Pydantic to load API keys from the environment (.env)

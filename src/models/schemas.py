@@ -6,9 +6,11 @@ Note: With the OpenAI Agents SDK, tool schemas are auto-generated from
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExpenseCategory(str, Enum):
@@ -175,4 +177,40 @@ class ProcessReceiptResponse(BaseModel):
     errors: list[str] = Field(
         default_factory=list,
         description="List of errors encountered during processing",
+    )
+
+
+class TransactionSource(str, Enum):
+    """Bank whose notification text is sent to POST /transactions."""
+
+    OPENBANK = "openbank"
+
+
+class TransactionRequest(BaseModel):
+    """Request body for ingesting one bank notification."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: TransactionSource = Field(..., description="Notification origin")
+    raw_text: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Notification text exactly as received",
+    )
+    received_at: datetime | None = Field(
+        default=None,
+        description="When the notification arrived (defaults to now, Europe/Madrid)",
+    )
+
+
+class TransactionResponse(BaseModel):
+    """Response from the transactions endpoint."""
+
+    status: Literal["saved", "duplicate", "ignored"]
+    data: CategorizedExpense | None = Field(
+        default=None, description="Row written to Gastos (only when saved)"
+    )
+    sheet_range: str | None = Field(
+        default=None, description="Range written by the append (only when saved)"
     )

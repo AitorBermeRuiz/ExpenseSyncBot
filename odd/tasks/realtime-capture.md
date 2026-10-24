@@ -24,8 +24,8 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 
 - [x] T1 S1,S2,S4 — Openbank parser + fingerprint (`src/ingestion/parsers.py`) — worker — commit: 4012eaf
 - [x] T2 S6 — Sheets API client: batchGet + append, service-account auth — worker — commit: 6eee64e
-- [x] T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — worker — commit: see git log (feat(ingestion): add ingestion service)
-- T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — inline — commit: pending
+- [x] T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — worker — commit: 252ffd9
+- [x] T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — worker — commit: next
 - T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` — inline — commit: pending
 - T6 S7 — CaixaBank email parser — blocked: waiting for a sample email
 - T7 S3 — Deploy: env vars, service-account key on server, shortcut/n8n wiring — blocked: needs user OK on server
