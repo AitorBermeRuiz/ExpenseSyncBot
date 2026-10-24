@@ -1,13 +1,17 @@
 """FastAPI application for ExpenseSyncBot.
 
 This is the main entry point for the expense automation API.
-It exposes the /process-receipt endpoint consumed by n8n.
+It exposes the /process-receipt endpoint consumed by n8n and the
+/transactions endpoint for real-time bank notifications.
 """
 
+import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
+from functools import lru_cache
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -15,8 +19,28 @@ from src.core.configs import settings
 from src.core.logging import setup_logging
 from src.expense_agents.constants import AGENT_TOOLS, FUNCTION_TOOLS
 from src.expense_agents.orchestrator import process_receipt_with_agents
-from src.models.schemas import ProcessReceiptRequest, ProcessReceiptResponse
+from src.ingestion import ingest, llm_categorize, parse_openbank
+from src.ingestion.parsers import MADRID
+from src.ingestion.service import Categorizer
+from src.models.schemas import (
+    CategorizedExpense,
+    ExpenseCategory,
+    MovementType,
+    ProcessReceiptRequest,
+    ProcessReceiptResponse,
+    TransactionRequest,
+    TransactionResponse,
+)
 from src.services.mcp_client import mcp_client
+from src.services.sheets_client import (
+    SheetsClient,
+    SheetsError,
+    service_account_token_provider,
+)
+
+NOT_CONFIGURED = HTTPException(
+    status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Ingestion not configured"
+)
 
 
 @asynccontextmanager
@@ -153,6 +177,87 @@ async def process_receipt(request: ProcessReceiptRequest) -> ProcessReceiptRespo
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing receipt",
         )
+
+
+# --- Real-time Ingestion ---
+def require_token(x_api_token: str | None = Header(default=None)) -> None:
+    """Reject requests without the shared ingestion token (fails closed if unset)."""
+    expected = settings.ingest.api_token
+    if not expected:
+        raise NOT_CONFIGURED
+    if x_api_token is None or not secrets.compare_digest(
+        x_api_token.encode(), expected.encode()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
+
+
+@lru_cache(maxsize=1)
+def get_sheets_client() -> SheetsClient:
+    """Build the Sheets client once (exceptions are not cached)."""
+    ingest_settings = settings.ingest
+    if (
+        not ingest_settings.spreadsheet_id
+        or not ingest_settings.google_credentials_file
+    ):
+        raise NOT_CONFIGURED
+    return SheetsClient(
+        ingest_settings.spreadsheet_id,
+        service_account_token_provider(ingest_settings.google_credentials_file),
+    )
+
+
+def get_categorizer() -> Categorizer:
+    """LLM fallback used when no "Reglas" row matches."""
+    return llm_categorize
+
+
+@app.post(
+    "/transactions",
+    response_model=TransactionResponse,
+    tags=["Processing"],
+    summary="Ingest a bank notification",
+    dependencies=[Depends(require_token)],
+)
+async def ingest_transaction(
+    request: TransactionRequest,
+    sheets: SheetsClient = Depends(get_sheets_client),
+    categorizer: Categorizer = Depends(get_categorizer),
+) -> TransactionResponse:
+    """Parse, deduplicate, categorize and append one bank movement."""
+    # Never log raw_text: it may contain names.
+    received_at = request.received_at or datetime.now(MADRID)
+    tx = parse_openbank(request.raw_text, received_at)
+    if tx is None:
+        logger.info(
+            f"Ignored transaction: source={request.source.value}, "
+            f"length={len(request.raw_text)}"
+        )
+        return TransactionResponse(status="ignored")
+
+    try:
+        result = await ingest(tx, sheets, categorizer)
+    except SheetsError as e:
+        logger.error(f"Sheets write failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Sheets write failed"
+        )
+
+    if result.status == "duplicate":
+        return TransactionResponse(status="duplicate")
+    fecha, tipo, categoria, importe, descripcion, _ = result.row
+    return TransactionResponse(
+        status="saved",
+        data=CategorizedExpense(
+            fecha=fecha,
+            tipo=MovementType(tipo),
+            categoria=ExpenseCategory(categoria),
+            importe=importe,
+            descripcion=descripcion,
+        ),
+        sheet_range=result.updated_range,
+    )
 
 
 # --- Utility Endpoints ---

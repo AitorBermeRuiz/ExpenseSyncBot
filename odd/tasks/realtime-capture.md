@@ -22,11 +22,11 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 
 ## Tasks
 
-- T1 S1,S2,S4 — Openbank parser + fingerprint (`src/ingestion/parsers.py`) — inline — commit: pending
-- T2 S6 — Sheets API client: batchGet + append, service-account auth — inline — commit: pending
-- T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — inline — commit: pending
-- T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — inline — commit: pending
-- T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` — inline — commit: pending
+- [x] T1 S1,S2,S4 — Openbank parser + fingerprint (`src/ingestion/parsers.py`) — worker — commit: 4012eaf
+- [x] T2 S6 — Sheets API client: batchGet + append, service-account auth — worker — commit: 6eee64e
+- [x] T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — worker — commit: 252ffd9
+- [x] T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — worker — commit: d833cfe
+- [x] T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` (`docs/reglas_seed.csv`) — inline — commit: 0d3cd1b
 - T6 S7 — CaixaBank email parser — blocked: waiting for a sample email
 - T7 S3 — Deploy: env vars, service-account key on server, shortcut/n8n wiring — blocked: needs user OK on server
 - T8 S8 — Telegram confirmation — deferred by user
@@ -41,3 +41,9 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 - L6 CaixaBank: email chosen; "Listo, configurado, pero aun n puedo probarlo. continuemos".
 - L7 Reglas: "Pestaña "Reglas" en la hoja"; Telegram: "Después"; dedup: "A".
 - L8 Open: column F of Gastos must be confirmed empty before deploy (not checked).
+- L9 Finding: Bizum concept is chosen by the sender and rows are written USER_ENTERED, so text cells starting with = + - @ must be escaped (formula injection). Covered in T3.
+- L10 Delivery: work-unit commits T1-T5 on feature/realtime-capture (~1.2k authored lines). PR split is the user's call: suggested chain = PR1 T1+T2 (parser, Sheets client), PR2 T3+T4+T5 (service, endpoint, seed).
+- L11 Server check (read-only, 2026-10-24): cloudflared is token-managed; only n8n (n8nn.aitorbermeruiz.es) is public; ports 5000/5678/8000 unreachable from the internet. Decision for T7: shortcut → n8n Webhook (Header Auth) → http://expensesyncbot:8000/transactions; do not expose ExpenseSyncBot because /process-receipt has no auth.
+- L12 Delivery: chained PRs opened. #13 feature/realtime-capture-core → main (T1, T2). #14 feature/realtime-capture → feature/realtime-capture-core (T3-T5, docs). Merging to main triggers deploy.yml; merge is the user's call.
+- L13 User (2026-10-24): "La columna F de gastos esta vacia." "Reglas creadas en hija de 'Reglas'" "Las credenciales no las roto de momento." "4: OK" "5: luego lo configuramos" "6: Luego".
+- L14 T7 server work (backups in ~/budget-automation/backup/*.20261024-170757): INGEST__* appended to ExpenseSyncBot/.env (token generated on server, not printed); compose mounts ./credentials/credentials.json (same key id as the MCP server) at /app/credentials/service-account.json:ro; n8n workflow "Openbank Transactions" (id OpbTxWebhook0001, docs/n8n/openbank-transactions.workflow.json) imported but CLI activation failed (SQLITE FOREIGN KEY, no workflow_history row) → activate from the n8n UI. Server ExpenseSyncBot checkout is at 0d16640 (behind origin/main), so GitHub deploys are not running; deploy is manual.
