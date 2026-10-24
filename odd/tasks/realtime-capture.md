@@ -25,8 +25,8 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 - [x] T1 S1,S2,S4 — Openbank parser + fingerprint (`src/ingestion/parsers.py`) — worker — commit: 4012eaf
 - [x] T2 S6 — Sheets API client: batchGet + append, service-account auth — worker — commit: 6eee64e
 - [x] T3 S4,S5 — Ingestion service: Reglas lookup, LLM fallback, dedup on column F, append — worker — commit: 252ffd9
-- [x] T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — worker — commit: next
-- T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` — inline — commit: pending
+- [x] T4 S3 — `POST /transactions` endpoint, token auth, settings, `.env.example`, README — worker — commit: d833cfe
+- [x] T5 S5 — Seed CSV for the "Reglas" tab from `business_rules.txt` (`docs/reglas_seed.csv`) — inline — commit: next
 - T6 S7 — CaixaBank email parser — blocked: waiting for a sample email
 - T7 S3 — Deploy: env vars, service-account key on server, shortcut/n8n wiring — blocked: needs user OK on server
 - T8 S8 — Telegram confirmation — deferred by user
@@ -42,3 +42,4 @@ through the Sheets API directly. Branch `feature/realtime-capture`. Engram mirro
 - L7 Reglas: "Pestaña "Reglas" en la hoja"; Telegram: "Después"; dedup: "A".
 - L8 Open: column F of Gastos must be confirmed empty before deploy (not checked).
 - L9 Finding: Bizum concept is chosen by the sender and rows are written USER_ENTERED, so text cells starting with = + - @ must be escaped (formula injection). Covered in T3.
+- L10 Delivery: work-unit commits T1-T5 on feature/realtime-capture (~1.2k authored lines). PR split is the user's call: suggested chain = PR1 T1+T2 (parser, Sheets client), PR2 T3+T4+T5 (service, endpoint, seed).

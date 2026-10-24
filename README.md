@@ -67,7 +67,7 @@ curl -X POST http://your-server:8000/transactions \
 | 502 | Sheets write failed |
 | 503 | Ingestion not configured |
 
-Sheet layout: **Gastos** `A:F` = Fecha, Tipo, Categoría, Importe, Descripción, Huella (fingerprint, can be hidden); **Reglas** `A:C` = Patrón, Categoría, Descripción (first matching pattern wins; LLM only when none matches).
+Sheet layout: **Gastos** `A:F` = Fecha, Tipo, Categoría, Importe, Descripción, Huella (fingerprint, can be hidden); **Reglas** `A:C` = Patrón, Categoría, Descripción (first matching pattern wins; LLM only when none matches). Seed the Reglas tab by importing `docs/reglas_seed.csv` (built from `business_rules.txt`); its `BIZUM DE` rule keeps Bizum senders away from the LLM.
 
 iOS 27 shortcut: automation trigger "Notification" from the Openbank app, action "Get Contents of URL" with POST JSON `source` = `openbank`, `raw_text` = Shortcut Input, `received_at` = Current Date, plus the `X-Api-Token` header.
 
